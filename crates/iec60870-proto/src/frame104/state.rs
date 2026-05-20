@@ -208,6 +208,7 @@ impl Connection {
             // Client receives STARTDT_con
             (UFunction::StartDtCon, Role::Client, State::Starting) => {
                 self.transition(State::Active);
+                self.flush_pending(Some(now));
             }
             // Server receives STARTDT_act → reply with con and go active
             (UFunction::StartDtAct, Role::Server, State::Stopped) => {
@@ -216,6 +217,7 @@ impl Connection {
                 });
                 self.last_send_any = Some(now);
                 self.transition(State::Active);
+                self.flush_pending(Some(now));
             }
             // Symmetric STOPDT handshake
             (UFunction::StopDtAct, Role::Server, _) => {

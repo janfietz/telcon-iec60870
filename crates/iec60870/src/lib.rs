@@ -46,4 +46,7 @@ pub use server104::{Server104, ServerConnection, ServerEvent};
 pub use transport::{Transport, DEFAULT_PORT, DEFAULT_TLS_PORT};
 
 #[cfg(feature = "tls")]
-pub use tls::{client_config_with_roots, tls_client_connect, TlsClient, TlsConfig};
+pub use tls::{
+    client_config_with_roots, tls_client_connect, tls_server_accept, tls_server_accept_with,
+    TlsClient, TlsConfig, TlsServer, TlsServerConnection,
+};

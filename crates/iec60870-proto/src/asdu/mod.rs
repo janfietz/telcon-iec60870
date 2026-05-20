@@ -11,4 +11,7 @@
 //! See [`docs/protocol-notes.md`](../../../../docs/protocol-notes.md) for the
 //! full byte-level reference.
 
+pub mod cot;
 pub mod ie;
+
+pub use cot::{Cause, Cot};

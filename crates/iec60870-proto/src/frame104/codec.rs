@@ -23,20 +23,28 @@ pub const START: u8 = 0x68;
 pub struct Codec;
 
 impl Codec {
-    /// Encode an APDU to `buf`. Returns the number of bytes written.
-    /// Truncates `asdu` to [`MAX_ASDU_LEN`] octets if oversized; callers
-    /// should split larger ASDUs at a higher layer.
-    pub fn encode<B: BufMut>(apdu: &Apdu, buf: &mut B) -> usize {
+    /// Encode an APDU to `buf`. Returns the number of bytes written, or
+    /// [`Error::AsduTooLong`] if the I-frame's ASDU exceeds
+    /// [`MAX_ASDU_LEN`]. The buffer is left untouched on error so a
+    /// rejected encode never produces a partial frame.
+    pub fn encode<B: BufMut>(apdu: &Apdu, buf: &mut B) -> Result<usize> {
+        if let Apdu::I { asdu, .. } = apdu {
+            if asdu.len() > MAX_ASDU_LEN {
+                return Err(Error::AsduTooLong {
+                    len: asdu.len(),
+                    max: MAX_ASDU_LEN,
+                });
+            }
+        }
         let start = buf.remaining_mut();
         match apdu {
             Apdu::I { send, recv, asdu } => {
-                let asdu_len = asdu.len().min(MAX_ASDU_LEN);
-                let length = 4 + asdu_len as u8;
+                let length = 4 + asdu.len() as u8;
                 buf.put_u8(START);
                 buf.put_u8(length);
                 buf.put_u16_le(send.to_wire()); // C1 C2, low bit of C1 must be 0
                 buf.put_u16_le(recv.to_wire()); // C3 C4
-                buf.put_slice(&asdu[..asdu_len]);
+                buf.put_slice(asdu);
             }
             Apdu::S { recv } => {
                 buf.put_u8(START);
@@ -54,7 +62,7 @@ impl Codec {
                 buf.put_u8(0x00);
             }
         }
-        start - buf.remaining_mut()
+        Ok(start - buf.remaining_mut())
     }
 
     /// Attempt to parse one APDU from the head of `buf`. Returns `Ok(None)`
@@ -206,8 +214,36 @@ mod tests {
 
     fn encode(apdu: &Apdu) -> Vec<u8> {
         let mut buf = BytesMut::new();
-        Codec::encode(apdu, &mut buf);
+        Codec::encode(apdu, &mut buf).expect("encode");
         buf.to_vec()
+    }
+
+    #[test]
+    fn encode_rejects_oversized_asdu() {
+        let mut buf = BytesMut::new();
+        let huge = vec![0u8; MAX_ASDU_LEN + 1];
+        let result = Codec::encode(
+            &Apdu::I {
+                send: SeqNo::new(0),
+                recv: SeqNo::new(0),
+                asdu: huge,
+            },
+            &mut buf,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(Error::AsduTooLong {
+                    len,
+                    max,
+                }) if len == MAX_ASDU_LEN + 1 && max == MAX_ASDU_LEN,
+            ),
+            "expected AsduTooLong, got {result:?}",
+        );
+        assert!(
+            buf.is_empty(),
+            "rejected encode must not write partial frames",
+        );
     }
 
     #[test]

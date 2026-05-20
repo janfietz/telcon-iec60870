@@ -14,7 +14,8 @@ use iec60870::proto::asdu::ie::{Quality, Siq};
 use iec60870::proto::asdu::types::M_SP_NA_1;
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
-use iec60870::{Client104, RedundancyServer, Server104, Transport};
+use iec60870::{Client104, RedundancyConfig, RedundancyServer, Server104, Transport};
+use std::sync::Arc;
 use tokio::time::sleep;
 
 async fn bind_redundancy() -> (RedundancyServer, SocketAddr) {
@@ -153,13 +154,10 @@ async fn send_active_errors_when_no_peer_active() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn inactive_peer_asdus_are_filtered() {
-    // Two clients connect; only the first is active. Anything the second
-    // sends (it would have to be after we manually demoted it) must not
-    // surface from recv_asdu(). We exercise this by sending from the demoted
-    // peer after the second one takes over: the first peer's link is closed
-    // when demoted, so the test instead asserts the demoted client observes
-    // its connection closing.
+async fn demoted_peer_observes_disconnect() {
+    // Demoting is implemented by closing the prior active peer's TCP
+    // session (the spec forbids server-initiated STOPDT). Verify the
+    // demoted client side actually observes that close.
     let (rs, addr) = bind_redundancy().await;
 
     let mut c1 = Client104::connect(Transport::tcp(addr), Config::default())
@@ -172,9 +170,6 @@ async fn inactive_peer_asdus_are_filtered() {
         .expect("c2 connect");
     let _second = wait_for_failover(&rs, first).await;
 
-    // The demoted client should observe its connection closing within a
-    // short window — that's how the redundancy manager signals "you are no
-    // longer the data link" given the spec forbids server-initiated STOPDT.
     let closed = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             match c1.recv().await {
@@ -187,4 +182,111 @@ async fn inactive_peer_asdus_are_filtered() {
     .await
     .unwrap_or(false);
     assert!(closed, "demoted client did not observe a connection close");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn max_peers_caps_concurrent_connections() {
+    // Cap = 1. Connect a first client and let it become active. A second
+    // accept must be refused: the manager drops its handle, which closes
+    // the TCP session, so the second Client104 either fails to complete
+    // STARTDT or observes a close shortly after connecting.
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = Server104::bind(bind, Config::default()).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let rs = RedundancyServer::spawn_with(
+        server,
+        RedundancyConfig {
+            max_peers: 1,
+            ..Default::default()
+        },
+    );
+
+    let _c1 = Client104::connect(Transport::tcp(addr), Config::default())
+        .await
+        .expect("c1 connect");
+    wait_until_active(&rs).await;
+
+    let mut c2 = Client104::connect(Transport::tcp(addr), Config::default())
+        .await
+        .expect("c2 tcp connect");
+
+    // c2 must close shortly: either StartDt never completes or Closed is
+    // surfaced. Bounded wait to keep the test deterministic.
+    let observed_close = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match c2.recv().await {
+                None => return true,
+                Some(iec60870::ClientEvent::Closed(_)) => return true,
+                Some(_) => continue,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(
+        observed_close,
+        "second client should be refused when max_peers cap is reached"
+    );
+
+    // Manager's view: still exactly one peer.
+    assert_eq!(rs.peers().await.len(), 1, "cap should keep peers ≤ 1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn promote_filter_rejects_disallowed_peer() {
+    // Filter rejects every promotion. The connecting client issues
+    // STARTDT, the manager refuses to promote, and disconnects the peer.
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = Server104::bind(bind, Config::default()).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let rs = RedundancyServer::spawn_with(
+        server,
+        RedundancyConfig {
+            promote_filter: Some(Arc::new(|_peer| false)),
+            ..Default::default()
+        },
+    );
+
+    let mut client = Client104::connect(Transport::tcp(addr), Config::default())
+        .await
+        .expect("connect");
+
+    // active_peer must stay None and the client must observe a close.
+    let observed_close = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match client.recv().await {
+                None => return true,
+                Some(iec60870::ClientEvent::Closed(_)) => return true,
+                Some(_) => continue,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(observed_close, "rejected peer should be disconnected");
+    assert!(
+        rs.active_peer().await.is_none(),
+        "rejected peer must not become active"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn promote_filter_allows_matching_peer() {
+    // Filter accepts only loopback addresses (which is what the test uses),
+    // so the peer is promoted normally.
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = Server104::bind(bind, Config::default()).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let rs = RedundancyServer::spawn_with(
+        server,
+        RedundancyConfig {
+            promote_filter: Some(Arc::new(|peer: SocketAddr| peer.ip().is_loopback())),
+            ..Default::default()
+        },
+    );
+
+    let _client = Client104::connect(Transport::tcp(addr), Config::default())
+        .await
+        .expect("connect");
+    let _peer = wait_until_active(&rs).await;
 }

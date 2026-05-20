@@ -49,7 +49,7 @@ pub mod serial;
 pub use client104::{Client104, ClientEvent};
 pub use error::{Error, Result};
 pub use handler::{DefaultLoggingHandler, EventHandler, NoopHandler};
-pub use redundancy::RedundancyServer;
+pub use redundancy::{RedundancyConfig, RedundancyServer};
 pub use server104::{Server104, ServerConnection, ServerEvent, ServerEvents, ServerSender};
 pub use transport::{Transport, DEFAULT_PORT, DEFAULT_TLS_PORT};
 

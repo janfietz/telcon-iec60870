@@ -20,6 +20,7 @@ pub mod cot;
 pub mod envelope;
 pub mod header;
 pub mod ie;
+pub(crate) mod io_list;
 pub mod payload;
 pub mod types;
 

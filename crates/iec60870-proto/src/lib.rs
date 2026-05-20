@@ -13,6 +13,7 @@
 
 pub mod asdu;
 pub mod error;
+pub mod frame101;
 pub mod frame104;
 
 pub use error::{Error, Result};

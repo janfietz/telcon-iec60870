@@ -18,7 +18,9 @@
 pub mod apdu;
 pub mod codec;
 pub mod seq;
+pub mod state;
 
 pub use apdu::{Apdu, ApduPayload, UFunction};
 pub use codec::Codec;
 pub use seq::SeqNo;
+pub use state::{Action, Config, Connection, DisconnectReason, Input, Role, State};

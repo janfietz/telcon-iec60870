@@ -4,6 +4,7 @@ members = [
     "crates/iec60870-proto",
     "crates/iec60870",
 ]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0-dev"

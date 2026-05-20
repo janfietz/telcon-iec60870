@@ -1,0 +1,32 @@
+[package]
+name = "iec60870-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+iec60870-proto = { path = "../crates/iec60870-proto" }
+
+[[bin]]
+name = "apdu_decode"
+path = "fuzz_targets/apdu_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "asdu_decode"
+path = "fuzz_targets/asdu_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame101_decode"
+path = "fuzz_targets/frame101_decode.rs"
+test = false
+doc = false
+bench = false

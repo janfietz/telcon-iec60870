@@ -8,10 +8,22 @@
 //! +--------+-----+-----+----+--------------+
 //! ```
 //!
+//! [`Asdu`] is the wire-level envelope: it carries the header fields and the
+//! information-objects section as raw bytes. To interpret the bytes as a
+//! specific Type ID, call [`Asdu::decode_payload`] with one of the types
+//! defined in [`types`] (or your own type implementing [`AsduPayload`]).
+//!
 //! See [`docs/protocol-notes.md`](../../../../docs/protocol-notes.md) for the
 //! full byte-level reference.
 
 pub mod cot;
+pub mod envelope;
+pub mod header;
 pub mod ie;
+pub mod payload;
+pub mod types;
 
 pub use cot::{Cause, Cot};
+pub use envelope::Asdu;
+pub use header::{AsduAddressing, CaSize, CommonAddress, CotSize, Ioa, IoaSize, Vsq};
+pub use payload::AsduPayload;

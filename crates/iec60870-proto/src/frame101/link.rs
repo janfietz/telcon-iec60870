@@ -422,8 +422,12 @@ impl Connection {
                 func: FuncCodePrimary::RequestUserDataClass2,
                 ..
             } => {
-                // No data to offer — send NACK/no-data.
-                self.send_nack_no_data(now);
+                // Serve the next queued ASDU if available; otherwise NACK.
+                if let Some(asdu) = self.send_queue.pop_front() {
+                    self.send_respond_user_data(asdu, now);
+                } else {
+                    self.send_nack_no_data(now);
+                }
             }
             _ => {
                 // Ignore unrecognised primary fixed frames.
@@ -469,11 +473,17 @@ impl Connection {
     // ---- Master send path --------------------------------------------------
 
     fn on_send_user_data(&mut self, asdu: Vec<u8>, now: Instant) {
-        if self.role != Role::Master {
-            return;
+        match self.role {
+            Role::Master => {
+                self.send_queue.push_back(asdu);
+                self.maybe_flush_queue(now);
+            }
+            Role::Outstation => {
+                // Outstation queues data for the master's next poll.
+                // Transmitted in response to RequestUserDataClass1/2.
+                self.send_queue.push_back(asdu);
+            }
         }
-        self.send_queue.push_back(asdu);
-        self.maybe_flush_queue(now);
     }
 
     fn on_request_status(&mut self, now: Instant) {
@@ -613,6 +623,20 @@ impl Connection {
         let frame = Frame101::Fixed {
             control: cf.encode(),
             address: self.config.link_address,
+        };
+        self.actions.push_back(Action::SendFrame(frame));
+    }
+
+    fn send_respond_user_data(&mut self, asdu: Vec<u8>, _now: Instant) {
+        let cf = ControlField::Secondary {
+            acd: false,
+            dfc: false,
+            func: FuncCodeSecondary::RespondUserData,
+        };
+        let frame = Frame101::Variable {
+            control: cf.encode(),
+            address: self.config.link_address,
+            asdu,
         };
         self.actions.push_back(Action::SendFrame(frame));
     }

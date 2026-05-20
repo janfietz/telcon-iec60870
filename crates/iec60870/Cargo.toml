@@ -46,3 +46,11 @@ required-features = ["tls"]
 [[example]]
 name = "client_104_tls"
 required-features = ["tls"]
+
+[[example]]
+name = "master_101"
+required-features = ["serial"]
+
+[[example]]
+name = "outstation_101"
+required-features = ["serial"]

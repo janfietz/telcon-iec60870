@@ -31,13 +31,19 @@ pub use iec60870_proto as proto;
 
 mod client104;
 mod driver;
+mod driver101;
 mod error;
 mod handler;
+mod master101;
+mod outstation101;
 mod server104;
 mod transport;
 
 #[cfg(feature = "tls")]
 mod tls;
+
+#[cfg(feature = "serial")]
+pub mod serial;
 
 pub use client104::{Client104, ClientEvent};
 pub use error::{Error, Result};
@@ -50,3 +56,6 @@ pub use tls::{
     client_config_with_roots, tls_client_connect, tls_server_accept, tls_server_accept_with,
     TlsClient, TlsConfig, TlsServer, TlsServerConnection,
 };
+
+pub use master101::{Master101, Master101Event};
+pub use outstation101::{Outstation101, Outstation101Event};

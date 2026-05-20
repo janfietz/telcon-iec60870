@@ -36,6 +36,7 @@ mod error;
 mod handler;
 mod master101;
 mod outstation101;
+mod redundancy;
 mod server104;
 mod transport;
 
@@ -48,7 +49,8 @@ pub mod serial;
 pub use client104::{Client104, ClientEvent};
 pub use error::{Error, Result};
 pub use handler::{DefaultLoggingHandler, EventHandler, NoopHandler};
-pub use server104::{Server104, ServerConnection, ServerEvent};
+pub use redundancy::RedundancyServer;
+pub use server104::{Server104, ServerConnection, ServerEvent, ServerEvents, ServerSender};
 pub use transport::{Transport, DEFAULT_PORT, DEFAULT_TLS_PORT};
 
 #[cfg(feature = "tls")]

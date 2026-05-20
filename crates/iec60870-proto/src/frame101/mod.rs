@@ -16,9 +16,13 @@
 //! * [`frame`] — the [`Frame101`] enum, [`SingleChar`], [`LinkAddress`], and
 //!   [`LinkAddressSize`].
 //! * [`codec`] — the stateless [`Codec`] that encodes and decodes frames.
+//! * [`control`] — the [`ControlField`] bit map with primary and secondary
+//!   function codes.
 
 pub mod codec;
+pub mod control;
 pub mod frame;
 
 pub use codec::Codec;
+pub use control::{ControlField, Direction, FuncCodePrimary, FuncCodeSecondary};
 pub use frame::{Frame101, LinkAddress, LinkAddressSize, SingleChar};

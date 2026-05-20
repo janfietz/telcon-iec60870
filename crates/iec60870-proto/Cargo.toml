@@ -1,0 +1,20 @@
+[package]
+name = "iec60870-proto"
+description = "Sans-I/O protocol layer for IEC 60870-5-101 and IEC 60870-5-104 (codecs and state machines)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+*.profraw
+lcov.info
+tarpaulin-report.html
+
+# Fuzz
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/

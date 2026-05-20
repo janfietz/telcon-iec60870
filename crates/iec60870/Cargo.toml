@@ -1,0 +1,39 @@
+[package]
+name = "iec60870"
+description = "Async client/server for IEC 60870-5-101 (serial) and IEC 60870-5-104 (TCP, optional TLS), built on tokio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+tls = ["dep:tokio-rustls", "dep:rustls", "dep:rustls-pemfile"]
+serial = ["dep:tokio-serial"]
+
+[dependencies]
+iec60870-proto = { workspace = true }
+
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+tokio-rustls = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
+
+tokio-serial = { workspace = true, optional = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true }

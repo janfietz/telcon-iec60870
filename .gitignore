@@ -20,3 +20,6 @@ tarpaulin-report.html
 fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
+
+# Worktrees
+.worktrees/

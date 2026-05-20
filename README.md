@@ -5,9 +5,8 @@ and electrical-grid systems.
 
 ## Status
 
-**0.1.0-dev** — IEC 60870-5-**104** (TCP/IP) is complete and exercised by
-end-to-end tests. IEC 60870-5-101 (serial) is on the roadmap; the ASDU layer
-is shared between the two so most of the heavy lifting is already done.
+**0.1.0-dev** — IEC 60870-5-**104** (TCP/IP) and IEC 60870-5-**101** (serial,
+FT 1.2 framing) are complete and exercised by end-to-end tests.
 
 | Feature | State |
 | --- | --- |
@@ -23,7 +22,7 @@ is shared between the two so most of the heavy lifting is already done.
 | TLS via `tokio-rustls` (feature `tls`) | ✅ |
 | `EventHandler` trait with `DefaultLoggingHandler` | ✅ |
 | End-to-end loopback integration test | ✅ |
-| IEC 60870-5-101 (serial transport, FT 1.2 framing) | 🚧 planned |
+| IEC 60870-5-101 (serial transport, FT 1.2 framing) | ✅ |
 | File-transfer ASDUs (120-127) | 🚧 planned |
 
 ## Workspace
@@ -31,7 +30,7 @@ is shared between the two so most of the heavy lifting is already done.
 | Crate | Description |
 | --- | --- |
 | [`iec60870-proto`](crates/iec60870-proto) | Sans-I/O protocol layer: ASDU codec, APCI framing for IEC 60870-5-104, and the connection state machine. No async, no sockets, no clocks — every entry point takes the current `Instant` explicitly. |
-| [`iec60870`](crates/iec60870) | Async client and server built on `tokio`. Plain TCP, TLS via `tokio-rustls` (feature `tls`), serial via `tokio-serial` (feature `serial`, planned). Hookable `EventHandler`. |
+| [`iec60870`](crates/iec60870) | Async client and server built on `tokio`. Plain TCP, TLS via `tokio-rustls` (feature `tls`), serial via `tokio-serial` (feature `serial`). Hookable `EventHandler`. |
 
 ## Quickstart
 

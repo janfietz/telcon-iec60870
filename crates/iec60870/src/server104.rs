@@ -2,8 +2,8 @@
 
 use std::net::SocketAddr;
 
+use iec60870_proto::asdu::{Asdu, AsduAddressing, AsduPayload, CommonAddress, Cot, Vsq};
 use iec60870_proto::frame104::apdu::MAX_ASDU_LEN;
-use iec60870_proto::asdu::{Asdu, AsduPayload, AsduAddressing, CommonAddress, Cot, Vsq};
 use iec60870_proto::frame104::{Config, DisconnectReason, Role, State};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;

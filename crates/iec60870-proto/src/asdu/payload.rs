@@ -4,7 +4,7 @@
 //!
 //! Built-in payload types live under [`crate::asdu::types`]. To add a custom
 //! ASDU type, define a struct that implements [`AsduPayload`] and pass it
-//! to [`crate::asdu::Asdu::with_payload`].
+//! to [`crate::asdu::Asdu::from_payload`].
 //!
 //! [`encode_information_objects`]: AsduPayload::encode_information_objects
 //! [`decode_information_objects`]: AsduPayload::decode_information_objects

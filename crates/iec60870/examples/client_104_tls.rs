@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
         match evt {
             ClientEvent::Asdu(bytes) => {
                 let parsed = Asdu::decode(&mut &bytes[..], AsduAddressing::IEC104)?;
-                match parsed.type_id {
+                match parsed.type_id() {
                     M_SP_NA_1::TYPE_ID => {
                         let p: M_SP_NA_1 = parsed.decode_payload(AsduAddressing::IEC104)?;
                         for (ioa, siq) in &p.objects {
@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
                             println!("[ME] ioa={} value={} quality={:?}", ioa.0, value.0, qds);
                         }
                     }
-                    other => println!("[??] type_id={other} cot={:?}", parsed.cot),
+                    other => println!("[??] type_id={other} cot={:?}", parsed.cot()),
                 }
             }
             ClientEvent::StateChanged(state) => tracing::info!(?state, "state changed"),

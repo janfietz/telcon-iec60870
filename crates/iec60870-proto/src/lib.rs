@@ -13,6 +13,7 @@
 
 pub mod asdu;
 pub mod error;
+pub mod file_transfer;
 pub mod frame101;
 pub mod frame104;
 

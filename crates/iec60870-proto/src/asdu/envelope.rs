@@ -17,18 +17,56 @@ use crate::error::{Error, Result};
 /// concrete payload types) to interpret the bytes as a specific Type ID.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Asdu {
-    pub type_id: u8,
-    pub vsq: Vsq,
-    pub cot: Cot,
-    pub ca: CommonAddress,
+    pub(crate) type_id: u8,
+    pub(crate) vsq: Vsq,
+    pub(crate) cot: Cot,
+    pub(crate) ca: CommonAddress,
     /// Information-objects section, exactly as it appeared on the wire.
-    pub payload: Vec<u8>,
+    pub(crate) payload: Vec<u8>,
 }
 
 impl Asdu {
     /// Header size in bytes for the given addressing profile (Type ID + VSQ + COT + CA).
     pub fn header_len(addressing: AsduAddressing) -> usize {
         1 + Vsq::LEN + addressing.cot_len() + addressing.ca_len()
+    }
+
+    /// Construct an `Asdu` from already-encoded payload bytes. Most callers
+    /// should prefer [`Asdu::from_payload`], which serialises a typed
+    /// payload, or [`Asdu::decode`], which parses one off the wire.
+    pub fn new(type_id: u8, vsq: Vsq, cot: Cot, ca: CommonAddress, payload: Vec<u8>) -> Self {
+        Self {
+            type_id,
+            vsq,
+            cot,
+            ca,
+            payload,
+        }
+    }
+
+    /// Type Identification field (e.g. `1` = `M_SP_NA_1`).
+    pub const fn type_id(&self) -> u8 {
+        self.type_id
+    }
+
+    /// Variable Structure Qualifier.
+    pub const fn vsq(&self) -> Vsq {
+        self.vsq
+    }
+
+    /// Cause of Transmission.
+    pub const fn cot(&self) -> Cot {
+        self.cot
+    }
+
+    /// Common Address of ASDU.
+    pub const fn ca(&self) -> CommonAddress {
+        self.ca
+    }
+
+    /// Raw information-objects bytes (exactly as on the wire).
+    pub fn payload_bytes(&self) -> &[u8] {
+        &self.payload
     }
 
     /// Build an Asdu by serialising a typed payload.
@@ -70,6 +108,15 @@ impl Asdu {
         }
         encode_ca(buf, self.ca, addressing.ca_size);
         buf.put_slice(&self.payload);
+    }
+
+    /// Encode the complete ASDU (header + payload bytes) into a freshly
+    /// allocated `Vec<u8>`. Convenience over [`Asdu::encode`] for the common
+    /// case of "give me bytes I can ship".
+    pub fn encode_to_vec(&self, addressing: AsduAddressing) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::header_len(addressing) + self.payload.len());
+        self.encode(&mut buf, addressing);
+        buf
     }
 
     /// Decode an ASDU. The `payload` field captures the remaining bytes of
@@ -158,6 +205,21 @@ mod tests {
         assert_eq!(&buf[..], &[0x01, 0x01, 0x14, 0x10, 0x07, 0x81]);
         let mut slice: &[u8] = &buf;
         assert_eq!(Asdu::decode(&mut slice, addressing).unwrap(), asdu);
+    }
+
+    #[test]
+    fn encode_to_vec_matches_encode_buf() {
+        let asdu = Asdu {
+            type_id: 100,
+            vsq: Vsq::single(1),
+            cot: Cot::with(Cause::ACTIVATION),
+            ca: CommonAddress(1),
+            payload: vec![0x00, 0x00, 0x00, 0x14],
+        };
+        let mut via_buf = BytesMut::new();
+        asdu.encode(&mut via_buf, AsduAddressing::IEC104);
+        let via_vec = asdu.encode_to_vec(AsduAddressing::IEC104);
+        assert_eq!(&via_buf[..], &via_vec[..]);
     }
 
     #[test]

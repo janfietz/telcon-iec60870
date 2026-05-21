@@ -16,6 +16,9 @@ pub enum Error {
     #[error("driver shut down")]
     DriverGone,
 
+    #[error("invalid transport for this entry point: {0}")]
+    InvalidTransport(&'static str),
+
     #[cfg(feature = "tls")]
     #[error("tls error: {0}")]
     Tls(String),

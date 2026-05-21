@@ -30,3 +30,17 @@ path = "fuzz_targets/frame101_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "state_machine"
+path = "fuzz_targets/state_machine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "asdu_decode_101"
+path = "fuzz_targets/asdu_decode_101.rs"
+test = false
+doc = false
+bench = false

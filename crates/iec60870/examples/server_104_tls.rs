@@ -125,9 +125,9 @@ async fn main() -> anyhow::Result<()> {
                                 continue;
                             }
                         };
-                        tracing::info!(type_id = parsed.type_id, "incoming asdu");
+                        tracing::info!(type_id = parsed.type_id(), "incoming asdu");
 
-                        if parsed.type_id == C_IC_NA_1::TYPE_ID {
+                        if parsed.type_id() == C_IC_NA_1::TYPE_ID {
                             let ack = C_IC_NA_1 {
                                 objects: vec![(Ioa(0), Qoi::GENERAL)],
                             };

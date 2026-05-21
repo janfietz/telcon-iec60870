@@ -126,8 +126,8 @@ async fn main() -> anyhow::Result<()> {
             Ok(Some(Outstation101Event::Asdu(bytes))) => {
                 match Asdu::decode(&mut &bytes[..], AsduAddressing::IEC104) {
                     Ok(parsed) => {
-                        tracing::info!(type_id = parsed.type_id, "received asdu from master");
-                        if parsed.type_id == C_IC_NA_1::TYPE_ID {
+                        tracing::info!(type_id = parsed.type_id(), "received asdu from master");
+                        if parsed.type_id() == C_IC_NA_1::TYPE_ID {
                             // Master sent a general interrogation — respond.
                             let (sp_bytes, me_bytes) = enqueue_bundle(&outstation);
                             outstation.send_asdu(sp_bytes).await?;

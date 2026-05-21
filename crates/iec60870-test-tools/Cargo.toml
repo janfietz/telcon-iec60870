@@ -1,0 +1,38 @@
+[package]
+name = "iec60870-test-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+description = "JSON-controlled IEC 60870-5 server/client daemons for testing 101 and 104 transports."
+
+[dependencies]
+iec60870 = { path = "../iec60870", features = ["serial"] }
+iec60870-proto = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["process"] }
+
+[[bin]]
+name = "iec-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "iec-client"
+path = "src/bin/client.rs"

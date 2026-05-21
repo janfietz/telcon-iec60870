@@ -16,6 +16,9 @@ pub enum Error {
     #[error("driver shut down")]
     DriverGone,
 
+    #[error("no active peer is currently in data-transfer state")]
+    NoActivePeer,
+
     #[cfg(feature = "tls")]
     #[error("tls error: {0}")]
     Tls(String),

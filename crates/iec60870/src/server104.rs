@@ -40,15 +40,61 @@ impl Server104 {
     }
 }
 
+/// A single connected peer.
+///
+/// `ServerConnection` is a thin facade over two halves: a cloneable
+/// [`ServerSender`] for outbound ASDUs and a [`ServerEvents`] event consumer.
+/// Use [`ServerConnection::split`] when you need to fan out events while
+/// sending into the same connection from multiple call sites — that's the
+/// shape [`RedundancyServer`](crate::RedundancyServer) is built on.
 #[derive(Debug)]
 pub struct ServerConnection {
+    sender: ServerSender,
+    events: ServerEvents,
+}
+
+/// Cloneable send-side handle. Holding any clone keeps the underlying driver
+/// task alive; dropping the last clone closes the TCP connection cleanly.
+#[derive(Debug, Clone)]
+pub struct ServerSender {
     peer: SocketAddr,
     cmd_tx: mpsc::Sender<Command>,
+}
+
+/// Exclusive event-receive half. Yields [`ServerEvent`]s in the order the
+/// driver task emitted them, returning `None` once the driver has exited.
+#[derive(Debug)]
+pub struct ServerEvents {
+    peer: SocketAddr,
     evt_rx: mpsc::Receiver<DriverEvent>,
-    _task: tokio::task::JoinHandle<Result<()>>,
 }
 
 impl ServerConnection {
+    pub fn peer(&self) -> SocketAddr {
+        self.sender.peer
+    }
+
+    pub async fn send_asdu(&self, asdu: Vec<u8>) -> Result<()> {
+        self.sender.send_asdu(asdu).await
+    }
+
+    pub async fn recv(&mut self) -> Option<ServerEvent> {
+        self.events.recv().await
+    }
+
+    pub async fn recv_asdu(&mut self) -> Option<Vec<u8>> {
+        self.events.recv_asdu().await
+    }
+
+    /// Decompose into independent send and event halves. The cloneable
+    /// sender can be shared across tasks while a single owner drives the
+    /// event stream.
+    pub fn split(self) -> (ServerSender, ServerEvents) {
+        (self.sender, self.events)
+    }
+}
+
+impl ServerSender {
     pub fn peer(&self) -> SocketAddr {
         self.peer
     }
@@ -58,6 +104,12 @@ impl ServerConnection {
             .send(Command::SendAsdu(asdu))
             .await
             .map_err(|_| Error::DriverGone)
+    }
+}
+
+impl ServerEvents {
+    pub fn peer(&self) -> SocketAddr {
+        self.peer
     }
 
     pub async fn recv(&mut self) -> Option<ServerEvent> {
@@ -94,7 +146,9 @@ pub(crate) fn spawn_connection<H: EventHandler>(
 ) -> ServerConnection {
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
     let (evt_tx, evt_rx) = mpsc::channel(64);
-    let task = tokio::spawn(driver::run(
+    // Driver task is detached; it exits when either channel side closes,
+    // which keeps connection teardown driven by the user-facing handles.
+    tokio::spawn(driver::run(
         stream,
         Role::Server,
         config,
@@ -103,9 +157,7 @@ pub(crate) fn spawn_connection<H: EventHandler>(
         evt_tx,
     ));
     ServerConnection {
-        peer,
-        cmd_tx,
-        evt_rx,
-        _task: task,
+        sender: ServerSender { peer, cmd_tx },
+        events: ServerEvents { peer, evt_rx },
     }
 }

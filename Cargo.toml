@@ -31,8 +31,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bytes = "1"
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "sync", "time", "fs"] }
 tokio-util = { version = "0.7", features = ["codec"] }
+async-trait = "0.1"
 
 # TLS (feature-gated by consumers)
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }

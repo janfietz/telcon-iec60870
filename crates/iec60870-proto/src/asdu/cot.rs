@@ -19,9 +19,20 @@ use crate::error::{Error, Result};
 
 /// Cause value (6-bit, 0..=63). Named constants cover the standard ones.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Cause(pub u8);
+pub struct Cause(pub(crate) u8);
 
 impl Cause {
+    /// Construct a `Cause` from its raw 6-bit value. Bits above bit 5 will be
+    /// truncated when the cause is encoded to the wire.
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
+    /// Raw 6-bit cause value.
+    pub const fn raw(self) -> u8 {
+        self.0
+    }
+
     pub const PERIODIC: Self = Self(1);
     pub const BACKGROUND: Self = Self(2);
     pub const SPONTANEOUS: Self = Self(3);
@@ -56,14 +67,14 @@ impl Cause {
 /// Cause of Transmission as carried inside an ASDU header.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Cot {
-    pub cause: Cause,
+    pub(crate) cause: Cause,
     /// `P/N` — set when the cause carries a negative confirmation.
-    pub negative: bool,
+    pub(crate) negative: bool,
     /// `T` — set when the ASDU was generated for test purposes.
-    pub test: bool,
+    pub(crate) test: bool,
     /// Originator address. Only used when the system is configured for the
     /// 2-octet COT (always the case for IEC 60870-5-104).
-    pub originator: u8,
+    pub(crate) originator: u8,
 }
 
 impl Cot {
@@ -90,6 +101,44 @@ impl Cot {
             test: false,
             originator: 0,
         }
+    }
+
+    /// Cause field of this COT.
+    pub const fn cause(self) -> Cause {
+        self.cause
+    }
+
+    /// Whether the `P/N` (negative-confirmation) bit is set.
+    pub const fn is_negative(self) -> bool {
+        self.negative
+    }
+
+    /// Whether the `T` (test) bit is set.
+    pub const fn is_test(self) -> bool {
+        self.test
+    }
+
+    /// Originator address byte (`0` in 1-octet mode).
+    pub const fn originator(self) -> u8 {
+        self.originator
+    }
+
+    /// Builder: set the `P/N` (negative-confirmation) bit.
+    pub const fn with_negative(mut self, negative: bool) -> Self {
+        self.negative = negative;
+        self
+    }
+
+    /// Builder: set the `T` (test) bit.
+    pub const fn with_test(mut self, test: bool) -> Self {
+        self.test = test;
+        self
+    }
+
+    /// Builder: set the originator address.
+    pub const fn with_originator(mut self, originator: u8) -> Self {
+        self.originator = originator;
+        self
     }
 
     fn first_octet(self) -> u8 {
@@ -162,26 +211,23 @@ mod tests {
 
     #[test]
     fn known_constants_have_correct_values() {
-        assert_eq!(Cause::SPONTANEOUS.0, 3);
-        assert_eq!(Cause::ACTIVATION.0, 6);
-        assert_eq!(Cause::ACTIVATION_TERMINATION.0, 10);
-        assert_eq!(Cause::INTERROGATED_GENERAL.0, 20);
-        assert_eq!(Cause::interrogated_group(1).0, 21);
-        assert_eq!(Cause::interrogated_group(16).0, 36);
-        assert_eq!(Cause::REQUESTED_COUNTER_GENERAL.0, 37);
-        assert_eq!(Cause::requested_counter_group(4).0, 41);
-        assert_eq!(Cause::UNKNOWN_TYPE_ID.0, 44);
-        assert_eq!(Cause::UNKNOWN_IOA.0, 47);
+        assert_eq!(Cause::SPONTANEOUS.raw(), 3);
+        assert_eq!(Cause::ACTIVATION.raw(), 6);
+        assert_eq!(Cause::ACTIVATION_TERMINATION.raw(), 10);
+        assert_eq!(Cause::INTERROGATED_GENERAL.raw(), 20);
+        assert_eq!(Cause::interrogated_group(1).raw(), 21);
+        assert_eq!(Cause::interrogated_group(16).raw(), 36);
+        assert_eq!(Cause::REQUESTED_COUNTER_GENERAL.raw(), 37);
+        assert_eq!(Cause::requested_counter_group(4).raw(), 41);
+        assert_eq!(Cause::UNKNOWN_TYPE_ID.raw(), 44);
+        assert_eq!(Cause::UNKNOWN_IOA.raw(), 47);
     }
 
     #[test]
     fn first_octet_packs_flags() {
-        let cot = Cot {
-            cause: Cause::SPONTANEOUS,
-            negative: true,
-            test: true,
-            originator: 0,
-        };
+        let cot = Cot::with(Cause::SPONTANEOUS)
+            .with_negative(true)
+            .with_test(true);
         let mut buf = BytesMut::new();
         cot.encode_1(&mut buf);
         // 0x80 (T) | 0x40 (P/N) | 0x03 (cause=3) == 0xC3
@@ -193,7 +239,7 @@ mod tests {
         // Cause is a 6-bit field; values above 63 are masked off, not refused.
         // This is deliberate: the wire format simply cannot carry them, so we
         // truncate rather than panic. Decoder will roundtrip the truncated value.
-        let cot = Cot::with(Cause(0xFF));
+        let cot = Cot::with(Cause::new(0xFF));
         let mut buf = BytesMut::new();
         cot.encode_1(&mut buf);
         assert_eq!(&buf[..], &[0x3F]);
@@ -201,12 +247,7 @@ mod tests {
 
     #[test]
     fn two_octet_carries_originator() {
-        let cot = Cot {
-            cause: Cause::ACTIVATION_CON,
-            negative: false,
-            test: false,
-            originator: 0xA5,
-        };
+        let cot = Cot::with(Cause::ACTIVATION_CON).with_originator(0xA5);
         let mut buf = BytesMut::new();
         cot.encode_2(&mut buf);
         assert_eq!(&buf[..], &[0x07, 0xA5]);
@@ -216,10 +257,10 @@ mod tests {
     fn decode_1_leaves_originator_zero() {
         let mut bytes: &[u8] = &[0xC3];
         let cot = Cot::decode_1(&mut bytes).unwrap();
-        assert_eq!(cot.cause, Cause::SPONTANEOUS);
-        assert!(cot.negative);
-        assert!(cot.test);
-        assert_eq!(cot.originator, 0);
+        assert_eq!(cot.cause(), Cause::SPONTANEOUS);
+        assert!(cot.is_negative());
+        assert!(cot.is_test());
+        assert_eq!(cot.originator(), 0);
     }
 
     #[test]
@@ -240,11 +281,11 @@ mod tests {
         // Cause is 6 bits — restrict the input domain so we can test exact roundtrip
         // without considering encode-side truncation.
         let originator_max = if width == 1 { 0 } else { 255 };
-        (0u8..64, any::<bool>(), any::<bool>(), 0u8..=originator_max).prop_map(|(c, n, t, o)| Cot {
-            cause: Cause(c),
-            negative: n,
-            test: t,
-            originator: o,
+        (0u8..64, any::<bool>(), any::<bool>(), 0u8..=originator_max).prop_map(|(c, n, t, o)| {
+            Cot::with(Cause::new(c))
+                .with_negative(n)
+                .with_test(t)
+                .with_originator(o)
         })
     }
 

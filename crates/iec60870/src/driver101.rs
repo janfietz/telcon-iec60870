@@ -24,7 +24,19 @@ use iec60870_proto::frame101::link::{Action, Config, Connection, Input, LinkStat
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
+
+/// Upper bound on bytes buffered while waiting for one IEC 60870-5-101 frame.
+///
+/// FT 1.2 variable-length frames top out at ~261 octets (`0x68 L L 0x68 C
+/// LA.. ASDU.. CS 0x16` with `L` ≤ 255). 1 KiB is plenty of headroom; a
+/// peer that holds the buffer above this without ever finishing a frame is
+/// disconnected.
+const MAX_RX_BUFFERED_101: usize = 1024;
+
+/// Possible FT 1.2 frame start octets: variable-length, fixed-length,
+/// single-octet ACK, single-octet NACK. Used to fast-skip on decode errors.
+const FT12_START_BYTES: [u8; 4] = [0x10, 0x68, 0xE5, 0xA2];
 
 /// Commands the user-facing handle sends to the driver task.
 #[derive(Debug)]
@@ -124,14 +136,46 @@ where
                         }
                         Ok(None) => break, // need more bytes
                         Err(e) => {
-                            tracing::warn!(target: "iec60870_101::rx", err = %e, "frame decode error; discarding buffer");
-                            // Discard the offending byte and try to resync.
-                            if !rx_buf.is_empty() {
-                                rx_buf.advance(1);
-                            }
+                            // Skip past the offending byte to the next
+                            // plausible FT 1.2 start octet, instead of
+                            // advancing one byte at a time (which lets a
+                            // hostile peer drive the parser as a CPU
+                            // amplifier across an aligned junk stream).
+                            let skipped = if rx_buf.is_empty() {
+                                0
+                            } else {
+                                let after_first = &rx_buf[1..];
+                                let next = after_first
+                                    .iter()
+                                    .position(|b| FT12_START_BYTES.contains(b))
+                                    .map(|i| i + 1)
+                                    .unwrap_or(rx_buf.len());
+                                rx_buf.advance(next);
+                                next
+                            };
+                            tracing::warn!(
+                                target: "iec60870_101::rx",
+                                err = %e,
+                                skipped,
+                                buffered = rx_buf.len(),
+                                "frame decode error; resynchronised to next start byte",
+                            );
                             break;
                         }
                     }
+                }
+                if rx_buf.len() > MAX_RX_BUFFERED_101 {
+                    tracing::error!(
+                        target: "iec60870_101::rx",
+                        buffered = rx_buf.len(),
+                        cap = MAX_RX_BUFFERED_101,
+                        "rx buffer overflow without a complete frame; closing link",
+                    );
+                    let _ = evt_tx.send(DriverEvent101::Closed(None)).await;
+                    return Err(Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "iec101 rx buffer overflow without a complete frame",
+                    )));
                 }
             }
         }

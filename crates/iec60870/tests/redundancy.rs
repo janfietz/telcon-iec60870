@@ -134,7 +134,7 @@ async fn send_active_routes_to_current_active_peer() {
         .expect("client recv timed out")
         .expect("client did not receive ASDU");
     let parsed = Asdu::decode(&mut &bytes[..], AsduAddressing::IEC104).unwrap();
-    assert_eq!(parsed.type_id, M_SP_NA_1::TYPE_ID);
+    assert_eq!(parsed.type_id(), M_SP_NA_1::TYPE_ID);
 }
 
 #[tokio::test(flavor = "current_thread")]

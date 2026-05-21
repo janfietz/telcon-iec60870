@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use iec60870_proto::frame104::apdu::MAX_ASDU_LEN;
 use iec60870_proto::frame104::{Config, DisconnectReason, Role, State};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -99,7 +100,18 @@ impl ServerSender {
         self.peer
     }
 
+    /// Send an ASDU (raw header + info-objects bytes) to the peer.
+    /// Returns [`iec60870_proto::Error::AsduTooLong`] (wrapped in
+    /// [`Error::Protocol`]) if the payload exceeds [`MAX_ASDU_LEN`] —
+    /// the IEC 60870-5-104 APDU length octet cannot represent more.
     pub async fn send_asdu(&self, asdu: Vec<u8>) -> Result<()> {
+        if asdu.len() > MAX_ASDU_LEN {
+            return Err(iec60870_proto::Error::AsduTooLong {
+                len: asdu.len(),
+                max: MAX_ASDU_LEN,
+            }
+            .into());
+        }
         self.cmd_tx
             .send(Command::SendAsdu(asdu))
             .await

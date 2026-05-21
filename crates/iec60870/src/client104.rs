@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use iec60870_proto::frame104::apdu::MAX_ASDU_LEN;
 use iec60870_proto::frame104::{Config, DisconnectReason, Role, State};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -59,7 +60,18 @@ impl Client104 {
     }
 
     /// Send an ASDU (raw header + info-objects bytes) over the connection.
+    /// Returns [`iec60870_proto::Error::AsduTooLong`] (wrapped in
+    /// [`Error::Protocol`]) if the payload exceeds the wire-format cap of
+    /// [`MAX_ASDU_LEN`] bytes — the IEC 60870-5-104 APDU length octet can
+    /// not represent anything larger.
     pub async fn send_asdu(&self, asdu: Vec<u8>) -> Result<()> {
+        if asdu.len() > MAX_ASDU_LEN {
+            return Err(iec60870_proto::Error::AsduTooLong {
+                len: asdu.len(),
+                max: MAX_ASDU_LEN,
+            }
+            .into());
+        }
         self.cmd_tx
             .send(Command::SendAsdu(asdu))
             .await

@@ -32,4 +32,7 @@ pub enum Error {
 
     #[error("unsupported frame format")]
     UnsupportedFormat,
+
+    #[error("asdu too long: {len} bytes (max {max})")]
+    AsduTooLong { len: usize, max: usize },
 }

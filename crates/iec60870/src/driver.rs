@@ -125,7 +125,7 @@ where
             Action::SendApdu(apdu) => {
                 handler.on_frame_sent(&apdu);
                 let mut buf = BytesMut::new();
-                Codec::encode(&apdu, &mut buf);
+                Codec::encode(&apdu, &mut buf)?;
                 write.write_all(&buf).await?;
                 write.flush().await?;
             }

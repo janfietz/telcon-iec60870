@@ -19,6 +19,9 @@ pub enum Error {
     #[error("no active peer is currently in data-transfer state")]
     NoActivePeer,
 
+    #[error("invalid transport for this entry point: {0}")]
+    InvalidTransport(&'static str),
+
     #[cfg(feature = "tls")]
     #[error("tls error: {0}")]
     Tls(String),

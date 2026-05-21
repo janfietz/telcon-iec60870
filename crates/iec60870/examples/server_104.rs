@@ -53,11 +53,11 @@ async fn main() -> anyhow::Result<()> {
                                 continue;
                             }
                         };
-                        tracing::info!(type_id = parsed.type_id, "incoming asdu");
+                        tracing::info!(type_id = parsed.type_id(), "incoming asdu");
 
                         // Answer a general interrogation with a few synthetic
                         // measurements (one single-point + two float values).
-                        if parsed.type_id == C_IC_NA_1::TYPE_ID {
+                        if parsed.type_id() == C_IC_NA_1::TYPE_ID {
                             // ACK the interrogation with COT = ActivationCon.
                             let ack = C_IC_NA_1 {
                                 objects: vec![(Ioa(0), Qoi::GENERAL)],

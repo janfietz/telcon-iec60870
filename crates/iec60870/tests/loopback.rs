@@ -14,7 +14,9 @@ use iec60870::proto::asdu::ie::{Quality, Siq};
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_SP_NA_1};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
-use iec60870::{Client104, Server104, ServerEvent, Transport};
+use iec60870::{
+    AsduPolicy, Client104, DefaultLoggingHandler, Server104, ServerEvent, Transport,
+};
 
 fn encode_asdu<P: AsduPayload>(payload: &P, cot: Cot, vsq: Vsq) -> Vec<u8> {
     let asdu = Asdu::from_payload(cot, CommonAddress(1), vsq, payload, AsduAddressing::IEC104);
@@ -38,7 +40,7 @@ async fn loopback_interrogation_roundtrip() {
             .expect("timeout")
             .expect("server got asdu");
         let parsed = Asdu::decode(&mut &asdu_bytes[..], AsduAddressing::IEC104).unwrap();
-        assert_eq!(parsed.type_id, C_IC_NA_1::TYPE_ID);
+        assert_eq!(parsed.type_id(), C_IC_NA_1::TYPE_ID);
 
         // Reply with a single-point measurement.
         let response = M_SP_NA_1 {
@@ -76,7 +78,7 @@ async fn loopback_interrogation_roundtrip() {
         .expect("client timeout")
         .expect("client got asdu");
     let parsed = Asdu::decode(&mut &asdu_bytes[..], AsduAddressing::IEC104).unwrap();
-    assert_eq!(parsed.type_id, M_SP_NA_1::TYPE_ID);
+    assert_eq!(parsed.type_id(), M_SP_NA_1::TYPE_ID);
 
     let decoded: M_SP_NA_1 = parsed.decode_payload(AsduAddressing::IEC104).unwrap();
     assert_eq!(decoded.objects.len(), 1);
@@ -115,4 +117,57 @@ async fn server_observes_state_changes() {
         .expect("connect");
 
     server_task.await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn asdu_policy_blocks_disallowed_type_id() {
+    // Server accepts with a policy that only allows monitor-direction
+    // M_SP_NA_1. The client will send a control-direction C_IC_NA_1; the
+    // policy must drop it before it reaches the server-side application.
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = Server104::bind(bind, Config::default()).await.unwrap();
+    let addr = server.local_addr().unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let policy = AsduPolicy::new().allow_type_id(M_SP_NA_1::TYPE_ID);
+        let mut conn = server
+            .accept_with_policy_and_handler(policy, DefaultLoggingHandler)
+            .await
+            .expect("accept");
+        // Drain events for a short while; we must NOT see any ASDU
+        // delivered, because the client only sends C_IC_NA_1.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(800);
+        let mut saw_asdu = false;
+        loop {
+            let evt = match tokio::time::timeout_at(deadline, conn.recv()).await {
+                Ok(e) => e,
+                Err(_) => break,
+            };
+            match evt {
+                Some(ServerEvent::Asdu(_)) => {
+                    saw_asdu = true;
+                    break;
+                }
+                Some(_) => continue,
+                None => break,
+            }
+        }
+        assert!(
+            !saw_asdu,
+            "policy was supposed to drop the C_IC_NA_1 — server must not see it"
+        );
+    });
+
+    let client = Client104::connect(Transport::tcp(addr), Config::default())
+        .await
+        .expect("connect");
+
+    let interrogation = C_IC_NA_1 {
+        objects: vec![(Ioa(0), Qoi::GENERAL)],
+    };
+    let bytes = encode_asdu(&interrogation, Cot::with(Cause::ACTIVATION), Vsq::single(1));
+    client.send_asdu(bytes).await.expect("client send");
+
+    // Wait for the server task to verify the drop.
+    let _ = server_handle.await;
 }

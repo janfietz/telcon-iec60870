@@ -196,7 +196,7 @@ impl Connection {
             Apdu::U { function } => self.on_u_frame(function, now),
             Apdu::S { recv } => {
                 if matches!(self.state, State::Active | State::Stopping) {
-                    self.acknowledge(recv);
+                    self.acknowledge(recv, now);
                 }
             }
             Apdu::I { send, recv, asdu } => self.on_i_frame(send, recv, asdu, now),
@@ -208,7 +208,7 @@ impl Connection {
             // Client receives STARTDT_con
             (UFunction::StartDtCon, Role::Client, State::Starting) => {
                 self.transition(State::Active);
-                self.flush_pending(Some(now));
+                self.flush_pending(now);
             }
             // Server receives STARTDT_act → reply with con and go active
             (UFunction::StartDtAct, Role::Server, State::Stopped) => {
@@ -217,7 +217,7 @@ impl Connection {
                 });
                 self.last_send_any = Some(now);
                 self.transition(State::Active);
-                self.flush_pending(Some(now));
+                self.flush_pending(now);
             }
             // Symmetric STOPDT handshake
             (UFunction::StopDtAct, Role::Server, _) => {
@@ -272,7 +272,7 @@ impl Connection {
         self.recv_next = self.recv_next.next();
         self.unacked_recv = self.unacked_recv.saturating_add(1);
         self.last_recv_iframe = Some(now);
-        self.acknowledge(recv);
+        self.acknowledge(recv, now);
         self.actions.push_back(Action::DeliverAsdu(asdu));
         if self.unacked_recv >= self.config.w {
             self.emit_supervisory(now);
@@ -281,7 +281,7 @@ impl Connection {
 
     /// Process an incoming N(R) — peer has acknowledged everything sent with
     /// `N(S) < n_r`. Drop those entries from the `sent` queue.
-    fn acknowledge(&mut self, nr: SeqNo) {
+    fn acknowledge(&mut self, nr: SeqNo, now: Instant) {
         while let Some(&(seq, _)) = self.sent.front() {
             // seq < nr in the cyclic ordering iff distance(seq, nr) is small
             // and non-zero. Use distance(seq, nr): if seq == nr the front is
@@ -296,13 +296,12 @@ impl Connection {
             self.sent.pop_front();
         }
         // Sent queue may now be drainable; try to flush pending.
-        self.flush_pending(self.last_recv_any);
+        self.flush_pending(now);
     }
 
-    fn flush_pending(&mut self, fallback_now: Option<Instant>) {
+    fn flush_pending(&mut self, now: Instant) {
         while !self.pending.is_empty() && self.sent.len() < self.config.k as usize {
             let asdu = self.pending.pop_front().unwrap();
-            let now = fallback_now.unwrap_or_else(Instant::now);
             self.send_iframe(asdu, now);
         }
     }
@@ -679,6 +678,54 @@ mod tests {
                 recv: SeqNo::new(0),
                 asdu: vec![3],
             })]
+        );
+    }
+
+    /// Drives the server side with a deterministic, far-in-the-future stub
+    /// clock and asserts that S-frame flushing of queued I-frames uses the
+    /// caller-supplied `Instant` rather than falling back to `Instant::now()`.
+    /// The `sent_at` timestamp recorded for the flushed I-frame must equal
+    /// the `now` passed into `handle`, not the real wall-clock time.
+    #[test]
+    fn flush_pending_uses_caller_clock_not_system_clock() {
+        // A reference instant arbitrarily far past the real `Instant::now()`
+        // so any accidental call to `Instant::now()` would produce a
+        // *smaller* value than `stub`.
+        let stub = Instant::now() + Duration::from_secs(60 * 60 * 24 * 365);
+        let config = Config {
+            k: 1,
+            t1: Duration::from_secs(30),
+            ..Config::default()
+        };
+        let mut c = Connection::new(Role::Server, config);
+        // Server: STARTDT_act → Active. Queue an ASDU before activation.
+        c.handle(Input::SendAsdu(vec![0xAA]), stub);
+        let actions = c.handle(
+            Input::Apdu(Apdu::U {
+                function: UFunction::StartDtAct,
+            }),
+            stub + Duration::from_millis(1),
+        );
+        // Flushed I-frame is among the actions.
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SendApdu(Apdu::I { .. }))));
+
+        // Now t1 must NOT expire at `stub + t1 - 1s` if `sent_at` was the
+        // stub instant. If `flush_pending` had reached for `Instant::now()`
+        // (which is ~1 year in the past relative to `stub`), then
+        // `now.saturating_duration_since(sent_at)` would be a positive value
+        // ~1 year and t1 would have fired immediately.
+        let actions = c.handle(
+            Input::Tick,
+            stub + Duration::from_secs(29),
+        );
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Disconnect(DisconnectReason::AckTimeout)
+            )),
+            "t1 fired before its deadline — flush_pending consulted the system clock"
         );
     }
 }

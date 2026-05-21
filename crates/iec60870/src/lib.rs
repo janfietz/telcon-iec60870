@@ -7,6 +7,8 @@
 //!
 //! ```ignore
 //! use iec60870::{Client104, Transport};
+//! use iec60870::proto::asdu::{CommonAddress, Cot, Cause, Ioa, Vsq};
+//! use iec60870::proto::asdu::types::{C_IC_NA_1, Qoi};
 //! use iec60870::proto::frame104::Config;
 //!
 //! #[tokio::main]
@@ -15,8 +17,15 @@
 //!         Transport::tcp("127.0.0.1:2404".parse()?),
 //!         Config::default(),
 //!     ).await?;
-//!     // Send a raw ASDU (encode via iec60870_proto::asdu::Asdu::encode).
-//!     client.send_asdu(vec![0x64, 0x01, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x14]).await?;
+//!
+//!     let interrogation = C_IC_NA_1 { objects: vec![(Ioa(0), Qoi::GENERAL)] };
+//!     client.send(
+//!         Cot::with(Cause::ACTIVATION),
+//!         CommonAddress(1),
+//!         Vsq::single(1),
+//!         &interrogation,
+//!     ).await?;
+//!
 //!     while let Some(asdu) = client.recv_asdu().await {
 //!         println!("received {} bytes", asdu.len());
 //!     }
@@ -33,9 +42,11 @@ mod client104;
 mod driver;
 mod driver101;
 mod error;
+pub mod file_transfer;
 mod handler;
 mod master101;
 mod outstation101;
+mod policy;
 mod redundancy;
 mod server104;
 mod transport;
@@ -49,14 +60,17 @@ pub mod serial;
 pub use client104::{Client104, ClientEvent};
 pub use error::{Error, Result};
 pub use handler::{DefaultLoggingHandler, EventHandler, NoopHandler};
+pub use policy::AsduPolicy;
 pub use redundancy::{RedundancyConfig, RedundancyServer};
 pub use server104::{Server104, ServerConnection, ServerEvent, ServerEvents, ServerSender};
 pub use transport::{Transport, DEFAULT_PORT, DEFAULT_TLS_PORT};
 
 #[cfg(feature = "tls")]
 pub use tls::{
-    client_config_with_roots, tls_client_connect, tls_server_accept, tls_server_accept_with,
-    TlsClient, TlsConfig, TlsServer, TlsServerConnection,
+    client_config_with_client_cert, client_config_with_roots, server_config_requiring_client_cert,
+    server_config_single_cert, tls_client_connect, tls_client_connect_with_policy,
+    tls_server_accept, tls_server_accept_with, tls_server_accept_with_policy, TlsClient,
+    TlsConfig, TlsServer, TlsServerConnection,
 };
 
 pub use master101::{Master101, Master101Event};

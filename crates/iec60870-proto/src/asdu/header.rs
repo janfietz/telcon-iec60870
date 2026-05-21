@@ -17,10 +17,10 @@ pub struct Vsq {
     /// `SQ` — when `true`, the ASDU contains a single IOA followed by
     /// `count` consecutive information elements. When `false`, each
     /// information object carries its own IOA.
-    pub sequence: bool,
+    pub(crate) sequence: bool,
     /// Number of information objects (0..=127). Values above 127 are
     /// truncated on encode to match the 7-bit wire field.
-    pub count: u8,
+    pub(crate) count: u8,
 }
 
 impl Vsq {
@@ -42,6 +42,16 @@ impl Vsq {
             sequence: true,
             count,
         }
+    }
+
+    /// Returns true when the `SQ` bit is set (single IOA + multiple elements).
+    pub const fn is_sequence(self) -> bool {
+        self.sequence
+    }
+
+    /// Number of information objects (or elements when [`is_sequence`](Self::is_sequence) is true).
+    pub const fn count(self) -> u8 {
+        self.count
     }
 
     pub fn encode<B: BufMut>(self, buf: &mut B) {

@@ -121,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
         match evt {
             Master101Event::Asdu(bytes) => {
                 match Asdu::decode(&mut &bytes[..], AsduAddressing::IEC104) {
-                    Ok(parsed) => match parsed.type_id {
+                    Ok(parsed) => match parsed.type_id() {
                         M_SP_NA_1::TYPE_ID => {
                             let p: M_SP_NA_1 =
                                 parsed.decode_payload(AsduAddressing::IEC104).unwrap();
@@ -139,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
                                 println!("[ME] ioa={} value={} quality={:?}", ioa.0, value.0, qds);
                             }
                         }
-                        other => println!("[??] type_id={other} cot={:?}", parsed.cot),
+                        other => println!("[??] type_id={other} cot={:?}", parsed.cot()),
                     },
                     Err(e) => tracing::warn!(?e, "failed to decode asdu"),
                 }

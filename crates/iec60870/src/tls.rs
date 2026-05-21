@@ -1,29 +1,48 @@
 //! TLS support via `tokio-rustls`. Available behind the `tls` cargo feature.
 //!
-//! IEC 62351-3 recommends TLS for IEC 60870-5-104 over public networks. The
-//! conventional port is 19998 (see [`crate::DEFAULT_TLS_PORT`]).
+//! ## IEC 62351-3 deployment notes
+//!
+//! IEC 62351-3 specifies TLS for IEC 60870-5-104 over untrusted or shared
+//! networks. The conventional port is **19998** (see
+//! [`crate::DEFAULT_TLS_PORT`]) and the standard **expects mutual TLS** —
+//! both controlling and controlled stations are authenticated with X.509
+//! certificates issued by an organisation-controlled CA.
+//!
+//! Helpers in this module:
+//!
+//! | Helper | Use for |
+//! | --- | --- |
+//! | [`client_config_with_roots`] | Server-authenticated TLS (server proves identity, client does not). Acceptable for **lab / development** only. |
+//! | [`client_config_with_client_cert`] | **Recommended** for production — client also presents a certificate, satisfying mTLS expectations. |
+//! | [`server_config_single_cert`] | Server-only authentication. Same caveat as `client_config_with_roots`. |
+//! | [`server_config_requiring_client_cert`] | **Recommended** for production — verifies the client certificate chain against the given root store and rejects unauthenticated peers. |
+//!
+//! `rustls` is configured with the `ring` provider; cipher suites and TLS
+//! versions follow `rustls` defaults (TLS 1.2 and 1.3 only, no SSL/early TLS).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use iec60870_proto::frame104::{Config, Role};
+use iec60870_proto::frame104::Config;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use tokio_rustls::rustls::server::WebPkiClientVerifier;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, ServerConfig};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::driver::{self, Command, DriverEvent};
+use crate::client104::Client104;
 use crate::error::{Error, Result};
 use crate::handler::{DefaultLoggingHandler, EventHandler};
-use crate::server104::ServerEvent;
+use crate::policy::AsduPolicy;
+use crate::server104::ServerConnection;
 use crate::transport::Transport;
 
 /// Re-export of the underlying `rustls::ClientConfig` for convenience.
 pub type TlsConfig = Arc<ClientConfig>;
 
 /// Build a `ClientConfig` that trusts the given list of root certificate
-/// authorities. This is sufficient for most internal-CA-signed peers.
+/// authorities. **The client does not authenticate itself** — use
+/// [`client_config_with_client_cert`] for IEC 62351-3 deployments.
 pub fn client_config_with_roots(roots: RootCertStore) -> TlsConfig {
     Arc::new(
         ClientConfig::builder()
@@ -31,6 +50,75 @@ pub fn client_config_with_roots(roots: RootCertStore) -> TlsConfig {
             .with_no_client_auth(),
     )
 }
+
+/// Build a `ClientConfig` for **mutual TLS**: the client trusts peers signed
+/// by `roots`, and presents `cert_chain` + `key` when the server requests a
+/// client certificate.
+///
+/// This is the configuration IEC 62351-3 expects for production deployments.
+///
+/// Returns an error if rustls cannot consume the given key (e.g. malformed
+/// PKCS#8).
+pub fn client_config_with_client_cert(
+    roots: RootCertStore,
+    cert_chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<TlsConfig> {
+    let cfg = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_client_auth_cert(cert_chain, key)
+        .map_err(|e| Error::Tls(format!("invalid client key/cert: {e}")))?;
+    Ok(Arc::new(cfg))
+}
+
+/// Build a `ServerConfig` that presents `cert_chain` + `key` and does **not**
+/// request a client certificate. Acceptable for lab use; use
+/// [`server_config_requiring_client_cert`] for IEC 62351-3 deployments.
+pub fn server_config_single_cert(
+    cert_chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<Arc<ServerConfig>> {
+    let cfg = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| Error::Tls(format!("invalid server key/cert: {e}")))?;
+    Ok(Arc::new(cfg))
+}
+
+/// Build a `ServerConfig` for **mutual TLS**: presents `cert_chain` + `key`
+/// to the peer, and *requires* the peer to present a client certificate
+/// signed by one of the roots in `client_roots`. Connections from
+/// unauthenticated peers are rejected during the TLS handshake.
+///
+/// This is the configuration IEC 62351-3 expects for production deployments.
+pub fn server_config_requiring_client_cert(
+    cert_chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+    client_roots: RootCertStore,
+) -> Result<Arc<ServerConfig>> {
+    let verifier = WebPkiClientVerifier::builder(Arc::new(client_roots))
+        .build()
+        .map_err(|e| Error::Tls(format!("building client cert verifier: {e}")))?;
+    let cfg = ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| Error::Tls(format!("invalid server key/cert: {e}")))?;
+    Ok(Arc::new(cfg))
+}
+
+// ---------------------------------------------------------------------------
+// Type aliases — preserved for source compatibility with the pre-unification
+// API. The underlying handles are the same `Client104` / `ServerConnection`
+// types used for plain TCP, since the driver is generic over the stream.
+// ---------------------------------------------------------------------------
+
+/// Alias for the unified [`Client104`] handle. TLS connections produce the
+/// same client type as plain TCP — only the constructor differs.
+pub type TlsClient = Client104;
+
+/// Alias for the unified [`ServerConnection`] handle. TLS-accepted
+/// connections produce the same type as plain-TCP-accepted ones.
+pub type TlsServerConnection = ServerConnection;
 
 // ---------------------------------------------------------------------------
 // Client
@@ -42,7 +130,18 @@ pub async fn tls_client_connect<H: EventHandler>(
     transport: Transport,
     config: Config,
     handler: H,
-) -> Result<TlsClient> {
+) -> Result<Client104> {
+    tls_client_connect_with_policy(transport, config, AsduPolicy::default(), handler).await
+}
+
+/// Connect an IEC 60870-5-104 client over TLS with a restrictive
+/// [`AsduPolicy`].
+pub async fn tls_client_connect_with_policy<H: EventHandler>(
+    transport: Transport,
+    config: Config,
+    policy: AsduPolicy,
+    handler: H,
+) -> Result<Client104> {
     let Transport::Tls {
         addr,
         server_name,
@@ -61,59 +160,7 @@ pub async fn tls_client_connect<H: EventHandler>(
         .await
         .map_err(|e| Error::Tls(format!("tls handshake: {e}")))?;
 
-    let (cmd_tx, cmd_rx) = mpsc::channel(32);
-    let (evt_tx, evt_rx) = mpsc::channel(64);
-    let task = tokio::spawn(driver::run(
-        stream,
-        Role::Client,
-        config,
-        handler,
-        cmd_rx,
-        evt_tx,
-    ));
-    cmd_tx
-        .send(Command::StartDt)
-        .await
-        .map_err(|_| Error::DriverGone)?;
-    Ok(TlsClient {
-        cmd_tx,
-        evt_rx,
-        _task: task,
-    })
-}
-
-/// TLS-secured IEC 60870-5-104 client handle.
-#[derive(Debug)]
-pub struct TlsClient {
-    cmd_tx: mpsc::Sender<Command>,
-    evt_rx: mpsc::Receiver<DriverEvent>,
-    _task: tokio::task::JoinHandle<Result<()>>,
-}
-
-impl TlsClient {
-    pub async fn send_asdu(&self, asdu: Vec<u8>) -> Result<()> {
-        self.cmd_tx
-            .send(Command::SendAsdu(asdu))
-            .await
-            .map_err(|_| Error::DriverGone)
-    }
-
-    pub async fn recv(&mut self) -> Option<crate::client104::ClientEvent> {
-        match self.evt_rx.recv().await? {
-            DriverEvent::Asdu(bytes) => Some(crate::client104::ClientEvent::Asdu(bytes)),
-            DriverEvent::StateChanged(state) => {
-                Some(crate::client104::ClientEvent::StateChanged(state))
-            }
-            DriverEvent::Closed(reason) => Some(crate::client104::ClientEvent::Closed(reason)),
-        }
-    }
-
-    pub async fn stop(&self) -> Result<()> {
-        self.cmd_tx
-            .send(Command::StopDt)
-            .await
-            .map_err(|_| Error::DriverGone)
-    }
+    Client104::spawn(stream, config, policy, handler).await
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +168,7 @@ impl TlsClient {
 // ---------------------------------------------------------------------------
 
 /// Accept one inbound TLS connection, perform the handshake, and spawn the
-/// IEC 60870-5-104 driver task. Returns a [`TlsServerConnection`] handle.
+/// IEC 60870-5-104 driver task. Returns a [`ServerConnection`] handle.
 ///
 /// Uses [`DefaultLoggingHandler`]; call [`tls_server_accept_with`] for a
 /// custom handler.
@@ -130,13 +177,13 @@ pub async fn tls_server_accept(
     peer: SocketAddr,
     acceptor: TlsAcceptor,
     config: Config,
-) -> Result<TlsServerConnection> {
+) -> Result<ServerConnection> {
     tls_server_accept_with(stream, peer, acceptor, config, DefaultLoggingHandler).await
 }
 
 /// Accept one inbound TLS connection with a custom event handler.
 ///
-/// Performs the TLS handshake, then spawns `driver::run` with the resulting
+/// Performs the TLS handshake, then spawns the driver with the resulting
 /// `TlsStream<TcpStream>` as the transport and `Role::Server`.
 pub async fn tls_server_accept_with<H: EventHandler>(
     stream: TcpStream,
@@ -144,77 +191,29 @@ pub async fn tls_server_accept_with<H: EventHandler>(
     acceptor: TlsAcceptor,
     config: Config,
     handler: H,
-) -> Result<TlsServerConnection> {
+) -> Result<ServerConnection> {
+    tls_server_accept_with_policy(stream, peer, acceptor, config, AsduPolicy::default(), handler)
+        .await
+}
+
+/// Accept one inbound TLS connection with a custom event handler and a
+/// restrictive [`AsduPolicy`].
+pub async fn tls_server_accept_with_policy<H: EventHandler>(
+    stream: TcpStream,
+    peer: SocketAddr,
+    acceptor: TlsAcceptor,
+    config: Config,
+    policy: AsduPolicy,
+    handler: H,
+) -> Result<ServerConnection> {
     stream.set_nodelay(true)?;
     let tls_stream = acceptor
         .accept(stream)
         .await
         .map_err(|e| Error::Tls(format!("tls accept: {e}")))?;
-
-    let (cmd_tx, cmd_rx) = mpsc::channel(32);
-    let (evt_tx, evt_rx) = mpsc::channel(64);
-    let task = tokio::spawn(driver::run(
-        tls_stream,
-        Role::Server,
-        config,
-        handler,
-        cmd_rx,
-        evt_tx,
-    ));
-    Ok(TlsServerConnection {
-        peer,
-        cmd_tx,
-        evt_rx,
-        _task: task,
-    })
-}
-
-/// Handle to a TLS-secured inbound IEC 60870-5-104 server connection.
-///
-/// Has the same interface as [`crate::ServerConnection`] so the same
-/// application logic can handle both plain-TCP and TLS connections.
-#[derive(Debug)]
-pub struct TlsServerConnection {
-    peer: SocketAddr,
-    cmd_tx: mpsc::Sender<Command>,
-    evt_rx: mpsc::Receiver<DriverEvent>,
-    _task: tokio::task::JoinHandle<Result<()>>,
-}
-
-impl TlsServerConnection {
-    /// Remote address of the connected peer.
-    pub fn peer(&self) -> SocketAddr {
-        self.peer
-    }
-
-    /// Send an ASDU (raw header + info-objects bytes) to the peer.
-    pub async fn send_asdu(&self, asdu: Vec<u8>) -> Result<()> {
-        self.cmd_tx
-            .send(Command::SendAsdu(asdu))
-            .await
-            .map_err(|_| Error::DriverGone)
-    }
-
-    /// Receive the next event from the connection. Returns `None` when the
-    /// driver has shut down.
-    pub async fn recv(&mut self) -> Option<ServerEvent> {
-        match self.evt_rx.recv().await? {
-            DriverEvent::Asdu(bytes) => Some(ServerEvent::Asdu(bytes)),
-            DriverEvent::StateChanged(state) => Some(ServerEvent::StateChanged(state)),
-            DriverEvent::Closed(reason) => Some(ServerEvent::Closed(reason)),
-        }
-    }
-
-    /// Convenience helper: drain events until the next ASDU arrives.
-    pub async fn recv_asdu(&mut self) -> Option<Vec<u8>> {
-        loop {
-            match self.recv().await? {
-                ServerEvent::Asdu(bytes) => return Some(bytes),
-                ServerEvent::Closed(_) => return None,
-                _ => continue,
-            }
-        }
-    }
+    Ok(ServerConnection::spawn(
+        tls_stream, peer, config, policy, handler,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -262,13 +261,32 @@ impl TlsServer {
     }
 
     /// Accept one connection using the [`DefaultLoggingHandler`].
-    pub async fn accept(&self) -> Result<TlsServerConnection> {
+    pub async fn accept(&self) -> Result<ServerConnection> {
         self.accept_with(DefaultLoggingHandler).await
     }
 
     /// Accept one connection with a custom event handler.
-    pub async fn accept_with<H: EventHandler>(&self, handler: H) -> Result<TlsServerConnection> {
+    pub async fn accept_with<H: EventHandler>(&self, handler: H) -> Result<ServerConnection> {
+        self.accept_with_policy_and_handler(AsduPolicy::default(), handler)
+            .await
+    }
+
+    /// Accept one connection with both a custom handler and a restrictive
+    /// [`AsduPolicy`].
+    pub async fn accept_with_policy_and_handler<H: EventHandler>(
+        &self,
+        policy: AsduPolicy,
+        handler: H,
+    ) -> Result<ServerConnection> {
         let (stream, peer) = self.listener.accept().await?;
-        tls_server_accept_with(stream, peer, self.acceptor.clone(), self.config, handler).await
+        tls_server_accept_with_policy(
+            stream,
+            peer,
+            self.acceptor.clone(),
+            self.config,
+            policy,
+            handler,
+        )
+        .await
     }
 }

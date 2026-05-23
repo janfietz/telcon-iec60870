@@ -140,13 +140,42 @@ impl DeadbandTracker {
         value: MonitoredValue,
         quality: Qds,
     ) -> Result<EmitDecision, DeadbandError> {
-        // No baseline yet — first sample.
-        if !self.baselines.contains_key(&ioa) {
+        // Rule 1: no baseline → first sample.
+        let Some(baseline) = self.baselines.get(&ioa).copied() else {
+            self.baselines.insert(ioa, Baseline { value, quality });
+            return Ok(EmitDecision::Emit);
+        };
+
+        // Rule 3 (checked before quality so we don't accidentally "emit" a
+        // wrong-kind sample): kind mismatch is an error; baseline untouched.
+        if baseline.value.kind() != value.kind() {
+            return Err(DeadbandError::KindMismatch {
+                ioa,
+                expected: baseline.value.kind(),
+                actual: value.kind(),
+            });
+        }
+
+        // Rule 2: quality bits differ → always emit.
+        if baseline.quality != quality {
             self.baselines.insert(ioa, Baseline { value, quality });
             return Ok(EmitDecision::Emit);
         }
-        // Placeholder until Tasks 3-4 fill it in.
-        unimplemented!("evaluate body, Tasks 3-4")
+
+        let policy = self.policy(ioa);
+
+        // Rule 4: no threshold configured → emit only if value actually changed.
+        if matches!(policy, DeadbandPolicy::None) {
+            if baseline.value == value {
+                return Ok(EmitDecision::Suppress);
+            }
+            self.baselines.insert(ioa, Baseline { value, quality });
+            return Ok(EmitDecision::Emit);
+        }
+
+        // Rule 5: threshold comparator — implemented in Task 4.
+        let _ = policy;
+        unimplemented!("threshold comparator, Task 4")
     }
 }
 
@@ -223,6 +252,74 @@ mod tests {
         assert_eq!(
             t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
             EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn quality_change_forces_emit_despite_threshold() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        // Seed baseline.
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        // Same value, flip `invalid`.
+        let bad = Qds {
+            overflow: false,
+            quality: Quality { invalid: true, ..Default::default() },
+        };
+        let decision = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), bad).unwrap();
+        assert_eq!(decision, EmitDecision::Emit);
+    }
+
+    #[test]
+    fn overflow_bit_change_forces_emit() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        let ovf = Qds { overflow: true, quality: Quality::default() };
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), ovf).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn kind_mismatch_returns_error_and_keeps_baseline() {
+        let mut t = DeadbandTracker::new();
+        t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds()).unwrap();
+        let err = t.evaluate(Ioa(1), MonitoredValue::Float(10.0), qds()).unwrap_err();
+        assert_eq!(
+            err,
+            DeadbandError::KindMismatch {
+                ioa: Ioa(1),
+                expected: ValueKind::Scaled,
+                actual: ValueKind::Float,
+            }
+        );
+        // Baseline still Scaled.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    #[test]
+    fn policy_none_always_emits_on_change() {
+        let mut t = DeadbandTracker::new();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0001), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn policy_none_same_value_suppresses() {
+        let mut t = DeadbandTracker::new();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        // Exactly equal value + equal quality → no change at all → Suppress.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            EmitDecision::Suppress
         );
     }
 }

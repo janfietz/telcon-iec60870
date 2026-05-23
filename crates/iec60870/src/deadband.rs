@@ -134,6 +134,29 @@ impl DeadbandTracker {
         self.baselines.clear();
     }
 
+    /// Record that an ASDU carrying this value+quality was emitted by the
+    /// caller (regardless of COT). Resets the baseline. Use from GI
+    /// responders, explicit Set handlers, and anywhere else a
+    /// non-deadband-gated ASDU goes out.
+    pub fn observe(
+        &mut self,
+        ioa: Ioa,
+        value: MonitoredValue,
+        quality: Qds,
+    ) -> Result<(), DeadbandError> {
+        if let Some(baseline) = self.baselines.get(&ioa) {
+            if baseline.value.kind() != value.kind() {
+                return Err(DeadbandError::KindMismatch {
+                    ioa,
+                    expected: baseline.value.kind(),
+                    actual: value.kind(),
+                });
+            }
+        }
+        self.baselines.insert(ioa, Baseline { value, quality });
+        Ok(())
+    }
+
     pub fn evaluate(
         &mut self,
         ioa: Ioa,
@@ -533,6 +556,50 @@ mod tests {
         assert_eq!(
             t.evaluate(Ioa(1), MonitoredValue::Float(f32::INFINITY), qds()).unwrap(),
             EmitDecision::Emit
+        );
+    }
+
+    // --- observe() --------------------------------------------------------
+
+    #[test]
+    fn observe_seeds_baseline_so_later_evaluate_suppresses() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        t.observe(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        // Without observe, evaluate(100.4) would emit as first-sample.
+        // With observe, the baseline is already 100.0; 100.4 is below 0.5.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    #[test]
+    fn observe_refreshes_baseline_for_subsequent_evaluate() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        // GI happens — bumps baseline to 105.0.
+        t.observe(Ioa(1), MonitoredValue::Float(105.0), qds()).unwrap();
+        // Without the observe, 105.4 would cross delta=0.5 from 100.0.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(105.4), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    #[test]
+    fn observe_kind_mismatch_returns_error() {
+        let mut t = DeadbandTracker::new();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        let err = t.observe(Ioa(1), MonitoredValue::Scaled(1), qds()).unwrap_err();
+        assert_eq!(
+            err,
+            DeadbandError::KindMismatch {
+                ioa: Ioa(1),
+                expected: ValueKind::Float,
+                actual: ValueKind::Scaled,
+            }
         );
     }
 }

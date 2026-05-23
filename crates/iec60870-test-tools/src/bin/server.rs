@@ -150,6 +150,8 @@ struct PeerEntry {
 /// All mutable daemon state behind a single `RwLock`.
 struct DaemonState {
     image: ProcessImage,
+    /// Per-IOA deadband state for gating spontaneous emissions.
+    tracker: iec60870::DeadbandTracker,
     /// 104 peers keyed by `SocketAddr`. Empty for 101.
     peers: HashMap<SocketAddr, PeerEntry>,
     /// 101 send channel. `None` for 104.
@@ -165,6 +167,7 @@ impl DaemonState {
         populate_default(&mut image);
         Self {
             image,
+            tracker: iec60870::DeadbandTracker::new(),
             peers: HashMap::new(),
             outstation_tx: None,
             start_time: Instant::now(),
@@ -974,7 +977,6 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
                 ticker.tick().await;
                 elapsed = elapsed.wrapping_add(1);
 
-                // Compute and store new value.
                 let (bytes, kind_str) = {
                     let mut s = state_tick.write().await;
                     let ca = s.coa;
@@ -986,24 +988,40 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
                     if let Some(v) = advance_value(&schedule, current.as_ref(), elapsed) {
                         s.image.set(ioa, v, None);
                     }
-                    let bytes = s
-                        .image
-                        .get(ioa)
-                        .and_then(|e| encode_point(ioa, e, Cot::with(Cause::SPONTANEOUS), ca));
+                    // Read updated entry + decide via deadband.
+                    let (val, qds) = match s.image.get(ioa) {
+                        Some(e) => iec60870_test_tools::points::entry_to_monitored(e),
+                        None => return,
+                    };
+                    let decision = match s.tracker.evaluate(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!(?e, ioa, "deadband evaluate error");
+                            iec60870::EmitDecision::Suppress
+                        }
+                    };
                     let kind_str = s
                         .image
                         .get(ioa)
                         .map(|e| format!("{:?}", e.kind))
                         .unwrap_or_default();
+                    let bytes = if matches!(decision, iec60870::EmitDecision::Emit) {
+                        s.image
+                            .get(ioa)
+                            .and_then(|e| encode_point(ioa, e, Cot::with(Cause::SPONTANEOUS), ca))
+                    } else {
+                        None
+                    };
                     (bytes, kind_str)
                 };
 
-                // Broadcast spontaneous ASDU to all peers.
                 if let Some(bytes) = bytes {
                     let s = state_tick.read().await;
                     s.broadcast(bytes).await;
                 }
 
+                // Always emit the SimTick event so observers see ticks even
+                // when the value channel is suppressed by deadband.
                 let _ = event_tx_tick.send(Event::SimTick { ioa, kind: kind_str });
             }
         });

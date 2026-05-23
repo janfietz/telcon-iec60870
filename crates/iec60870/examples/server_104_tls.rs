@@ -13,6 +13,18 @@
 //! ```text
 //! RUST_LOG=iec60870=debug cargo run --example server_104_tls --features tls
 //! ```
+//!
+//! This demo uses server-authenticated TLS only (no client cert) so that the
+//! matching `client_104_tls` example can connect out-of-the-box. For
+//! production deployments use [`TlsServer::bind_with_security`] with a
+//! [`TlsSecurityConfig`](iec60870::TlsSecurityConfig) — that lets you
+//! configure an explicit CA root store, restrict cipher suites, and apply a
+//! [`ClientCertPolicy`](iec60870::ClientCertPolicy) such as pinned SHA-256
+//! fingerprints. See `tests/loopback_mtls.rs` for full examples.
+//!
+//! Set `IEC_ALLOW` to restrict who may connect (CIDRs or bare IPs, comma
+//! separated). The filter runs *before* the TLS handshake so denied peers
+//! never consume crypto work.
 
 use std::fs;
 use std::net::Ipv4Addr;
@@ -26,7 +38,7 @@ use iec60870::proto::asdu::ie::{Qds, Quality, Siq, R32};
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_ME_NC_1, M_SP_NA_1};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
-use iec60870::{DefaultLoggingHandler, ServerEvent, TlsServer};
+use iec60870::{DefaultLoggingHandler, IpFilter, ServerEvent, TlsServer};
 use rcgen::{CertificateParams, DistinguishedName, DnValue, KeyPair, SanType};
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::ServerConfig;
@@ -107,7 +119,27 @@ async fn main() -> anyhow::Result<()> {
         .with_single_cert(certs, key.into())?;
 
     let bind = (Ipv4Addr::UNSPECIFIED, 19998).into();
-    let server = TlsServer::bind(bind, Arc::new(server_config), Config::default()).await?;
+    let ip_filter = match std::env::var("IEC_ALLOW") {
+        Ok(raw) => {
+            let entries: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let filter = IpFilter::from_strs(&entries)?;
+            tracing::info!(?entries, "IP allow-list active");
+            filter
+        }
+        Err(_) => IpFilter::allow_all(),
+    };
+    // `bind_with_filter` keeps the raw-rustls `ServerConfig` path (the
+    // matching client demo uses no-client-auth) but still gates connections
+    // on the IP allow-list before the TLS handshake runs. For full mTLS
+    // hardening, use `TlsServer::bind_with_security(...)` with a
+    // `TlsSecurityConfig` instead.
+    let server = TlsServer::bind_with_filter(
+        bind,
+        Arc::new(server_config),
+        Config::default(),
+        ip_filter,
+    )
+    .await?;
     tracing::info!(addr = ?server.local_addr()?, "TLS server listening");
 
     loop {

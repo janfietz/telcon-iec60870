@@ -10,6 +10,7 @@
 #![cfg(feature = "tls")]
 
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1};
@@ -17,10 +18,11 @@ use iec60870::proto::asdu::{CommonAddress, Cot, Ioa, Vsq};
 use iec60870::proto::frame104::Config;
 use iec60870::{
     client_config_with_client_cert, client_config_with_roots,
-    server_config_requiring_client_cert, tls_client_connect, ClientEvent, NoopHandler, Transport,
-    TlsServer,
+    server_config_requiring_client_cert, tls_client_connect, ClientCertPolicy, ClientEvent,
+    IpFilter, NoopHandler, TlsSecurityConfig, Transport, TlsServer, VerifyError,
 };
 use rcgen::{CertificateParams, DistinguishedName, DnValue, KeyPair, SanType};
+use sha2::{Digest, Sha256};
 use tokio_rustls::rustls::pki_types::{
     CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer,
 };
@@ -91,6 +93,294 @@ fn roots_from(cert: &CertificateDer<'static>) -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.add(cert.clone()).unwrap();
     roots
+}
+
+fn sha256(der: &[u8]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(der);
+    h.finalize().into()
+}
+
+/// Build a `TlsSecurityConfig` for the given PKI with the supplied policy.
+/// `cipher_suites` / `signature_schemes` follow rustls defaults.
+fn security_for(pki: &Pki, policy: ClientCertPolicy) -> TlsSecurityConfig {
+    TlsSecurityConfig {
+        server_chain: pki.server_chain.clone(),
+        server_key: pki.server_key.clone_key(),
+        client_roots: roots_from(&pki.ca_cert),
+        cipher_suites: None,
+        signature_schemes: None,
+        client_cert_policy: policy,
+    }
+}
+
+/// Issue a fresh CA + client leaf that is *not* signed by `pki.ca_cert` —
+/// used to verify the custom-root-store path rejects unrelated authorities.
+fn issue_unrelated_client() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
+    let mut other_ca_params = CertificateParams::default();
+    other_ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let mut dn = DistinguishedName::new();
+    dn.push(
+        rcgen::DnType::CommonName,
+        DnValue::Utf8String("iec60870-test-other-ca".into()),
+    );
+    other_ca_params.distinguished_name = dn;
+    let other_ca_key = KeyPair::generate().unwrap();
+    let other_ca = other_ca_params.self_signed(&other_ca_key).unwrap();
+
+    let mut leaf_params = CertificateParams::default();
+    let mut leaf_dn = DistinguishedName::new();
+    leaf_dn.push(
+        rcgen::DnType::CommonName,
+        DnValue::Utf8String("iec60870-test-other-client".into()),
+    );
+    leaf_params.distinguished_name = leaf_dn;
+    let leaf_key = KeyPair::generate().unwrap();
+    let leaf = leaf_params
+        .signed_by(&leaf_key, &other_ca, &other_ca_key)
+        .unwrap();
+
+    let der = leaf_key.serialize_der();
+    (
+        vec![leaf.der().clone()],
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(der)),
+    )
+}
+
+/// Run `accept_with` in a background task and return the join handle.
+/// The accept future is wrapped in a short timeout so the test can assert
+/// rejection via the client side without leaking tasks.
+fn spawn_accept(server: TlsServer) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let _ = tokio::time::timeout(Duration::from_secs(3), server.accept()).await;
+    })
+}
+
+/// Attempt a TLS connect from `client_chain` + `client_key`, then drain a few
+/// events. Returns true if the connection was rejected (either the connect
+/// returned an error, or the driver immediately reported `Closed`).
+async fn expect_rejection(
+    addr: std::net::SocketAddr,
+    ca: &CertificateDer<'static>,
+    client_chain: Vec<CertificateDer<'static>>,
+    client_key: PrivateKeyDer<'static>,
+) -> bool {
+    let client_cfg =
+        client_config_with_client_cert(roots_from(ca), client_chain, client_key).expect("client cfg");
+    let transport = Transport::Tls {
+        addr,
+        server_name: "server.test".into(),
+        client_config: client_cfg,
+    };
+
+    let connect = tokio::time::timeout(
+        Duration::from_secs(3),
+        tls_client_connect(transport, Config::default(), NoopHandler),
+    )
+    .await
+    .expect("connect attempt should not hang");
+
+    match connect {
+        Err(_) => true,
+        Ok(mut client) => {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                match tokio::time::timeout_at(deadline, client.recv()).await {
+                    Ok(None) => return true,
+                    Ok(Some(ClientEvent::Closed(_))) => return true,
+                    Ok(Some(_)) => continue,
+                    Err(_) => return false,
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pinned_fingerprint_accepts_matching_client() {
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let pki = build_pki();
+
+    let pin = sha256(pki.client_chain[0].as_ref());
+    let security = security_for(&pki, ClientCertPolicy::PinnedFingerprints(vec![pin]));
+
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = TlsServer::bind_with_security(
+        bind,
+        Config::default(),
+        security,
+        IpFilter::allow_all(),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local_addr");
+    let server_task = spawn_accept(server);
+
+    let client_cfg = client_config_with_client_cert(
+        roots_from(&pki.ca_cert),
+        pki.client_chain,
+        pki.client_key,
+    )
+    .expect("client cfg");
+    let transport = Transport::Tls {
+        addr,
+        server_name: "server.test".into(),
+        client_config: client_cfg,
+    };
+
+    let mut client = tls_client_connect(transport, Config::default(), NoopHandler)
+        .await
+        .expect("matching pin must connect");
+
+    client
+        .send(
+            Cot::act(),
+            CommonAddress(1),
+            Vsq::single(1),
+            &C_IC_NA_1 {
+                objects: vec![(Ioa(0), Qoi::GENERAL)],
+            },
+        )
+        .await
+        .expect("send");
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), client.recv()).await;
+    drop(client);
+    let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pinned_fingerprint_rejects_wrong_pin() {
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let pki = build_pki();
+
+    let security = security_for(&pki, ClientCertPolicy::PinnedFingerprints(vec![[0u8; 32]]));
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = TlsServer::bind_with_security(
+        bind,
+        Config::default(),
+        security,
+        IpFilter::allow_all(),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local_addr");
+    let server_task = spawn_accept(server);
+
+    let rejected = expect_rejection(addr, &pki.ca_cert, pki.client_chain, pki.client_key).await;
+    assert!(rejected, "wrong fingerprint pin must be rejected");
+    let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_verifier_can_reject() {
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let pki = build_pki();
+
+    let policy = ClientCertPolicy::CustomVerifier(Arc::new(|_chain| {
+        Err(VerifyError("policy denied".into()))
+    }));
+    let security = security_for(&pki, policy);
+
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = TlsServer::bind_with_security(
+        bind,
+        Config::default(),
+        security,
+        IpFilter::allow_all(),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local_addr");
+    let server_task = spawn_accept(server);
+
+    let rejected = expect_rejection(addr, &pki.ca_cert, pki.client_chain, pki.client_key).await;
+    assert!(rejected, "custom verifier denial must be propagated");
+    let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_root_store_rejects_other_ca() {
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let pki = build_pki();
+
+    let security = security_for(&pki, ClientCertPolicy::TrustChain);
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = TlsServer::bind_with_security(
+        bind,
+        Config::default(),
+        security,
+        IpFilter::allow_all(),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local_addr");
+    let server_task = spawn_accept(server);
+
+    // Build a client whose cert is signed by an *unrelated* CA, but advertise
+    // trust for the *server* CA so the client itself completes its half of
+    // the handshake.
+    let (other_chain, other_key) = issue_unrelated_client();
+    let rejected = expect_rejection(addr, &pki.ca_cert, other_chain, other_key).await;
+    assert!(rejected, "client cert from unknown CA must be rejected");
+    let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cipher_allowlist_takes_effect() {
+    use tokio_rustls::rustls::crypto::{ring, CryptoProvider};
+    use tokio_rustls::rustls::ClientConfig;
+
+    let _ = ring::default_provider().install_default();
+    let pki = build_pki();
+
+    // Server allows only TLS_CHACHA20_POLY1305_SHA256.
+    let mut security = security_for(&pki, ClientCertPolicy::TrustChain);
+    security.cipher_suites = Some(vec![ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256]);
+
+    let bind = (Ipv4Addr::LOCALHOST, 0).into();
+    let server = TlsServer::bind_with_security(
+        bind,
+        Config::default(),
+        security,
+        IpFilter::allow_all(),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local_addr");
+    let server_task = spawn_accept(server);
+
+    // Client offers only TLS_AES_256_GCM_SHA384 — no intersection.
+    let mut provider: CryptoProvider = ring::default_provider();
+    provider.cipher_suites = vec![ring::cipher_suite::TLS13_AES_256_GCM_SHA384];
+    let provider = Arc::new(provider);
+
+    let client_cfg = Arc::new(
+        ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("versions")
+            .with_root_certificates(roots_from(&pki.ca_cert))
+            .with_client_auth_cert(pki.client_chain, pki.client_key)
+            .expect("client auth"),
+    );
+
+    let transport = Transport::Tls {
+        addr,
+        server_name: "server.test".into(),
+        client_config: client_cfg,
+    };
+    let connect = tokio::time::timeout(
+        Duration::from_secs(3),
+        tls_client_connect(transport, Config::default(), NoopHandler),
+    )
+    .await
+    .expect("connect must not hang");
+
+    assert!(
+        connect.is_err(),
+        "handshake must fail when cipher suites do not intersect"
+    );
+    let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

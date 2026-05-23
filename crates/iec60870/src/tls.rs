@@ -34,6 +34,7 @@ use crate::client104::Client104;
 use crate::error::{Error, Result};
 use crate::handler::{DefaultLoggingHandler, EventHandler};
 use crate::policy::AsduPolicy;
+use crate::security::{IpFilter, TlsSecurityConfig};
 use crate::server104::ServerConnection;
 use crate::transport::Transport;
 
@@ -228,6 +229,7 @@ pub struct TlsServer {
     listener: TcpListener,
     acceptor: TlsAcceptor,
     config: Config,
+    ip_filter: IpFilter,
 }
 
 impl std::fmt::Debug for TlsServer {
@@ -246,12 +248,52 @@ impl TlsServer {
         server_config: Arc<ServerConfig>,
         config: Config,
     ) -> Result<Self> {
+        Self::bind_with(addr, server_config, config, IpFilter::allow_all()).await
+    }
+
+    /// Bind a `TlsServer` from a [`TlsSecurityConfig`], applying an
+    /// [`IpFilter`] to every accept *before* the TLS handshake runs.
+    ///
+    /// Use this entry point for production deployments: it bundles the
+    /// server cert/key, the trusted client-CA roots, optional cipher and
+    /// signature-scheme allowlists, and the [`ClientCertPolicy`](crate::ClientCertPolicy)
+    /// in one place.
+    pub async fn bind_with_security(
+        addr: SocketAddr,
+        config: Config,
+        tls_security: TlsSecurityConfig,
+        ip_filter: IpFilter,
+    ) -> Result<Self> {
+        let server_config = tls_security.build_server_config()?;
+        Self::bind_with(addr, server_config, config, ip_filter).await
+    }
+
+    /// Bind a `TlsServer` from a pre-built rustls `ServerConfig`, also
+    /// applying an [`IpFilter`]. Use this when you already have a custom
+    /// `ServerConfig` (e.g. legacy code, raw rustls integration) but still
+    /// want pre-handshake IP allow-listing.
+    pub async fn bind_with_filter(
+        addr: SocketAddr,
+        server_config: Arc<ServerConfig>,
+        config: Config,
+        ip_filter: IpFilter,
+    ) -> Result<Self> {
+        Self::bind_with(addr, server_config, config, ip_filter).await
+    }
+
+    async fn bind_with(
+        addr: SocketAddr,
+        server_config: Arc<ServerConfig>,
+        config: Config,
+        ip_filter: IpFilter,
+    ) -> Result<Self> {
         let listener = TcpListener::bind(addr).await?;
         let acceptor = TlsAcceptor::from(server_config);
         Ok(Self {
             listener,
             acceptor,
             config,
+            ip_filter,
         })
     }
 
@@ -278,7 +320,14 @@ impl TlsServer {
         policy: AsduPolicy,
         handler: H,
     ) -> Result<ServerConnection> {
-        let (stream, peer) = self.listener.accept().await?;
+        let (stream, peer) = loop {
+            let (stream, peer) = self.listener.accept().await?;
+            if self.ip_filter.contains(peer) {
+                break (stream, peer);
+            }
+            tracing::warn!(%peer, "iec60870: peer rejected by ip filter (pre-tls)");
+            drop(stream);
+        };
         tls_server_accept_with_policy(
             stream,
             peer,

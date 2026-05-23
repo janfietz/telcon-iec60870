@@ -15,6 +15,7 @@ use crate::file_transfer::service::{self as ft_service, ProviderObject};
 use crate::file_transfer::{FileTransferConfig, FileTransferHandle, FileTransferProvider};
 use crate::handler::{DefaultLoggingHandler, EventHandler};
 use crate::policy::AsduPolicy;
+use crate::security::IpFilter;
 
 /// IEC 60870-5-104 server. Bind a port, then `accept().await` returns a
 /// [`ServerConnection`] for each new peer.
@@ -23,15 +24,32 @@ pub struct Server104 {
     listener: TcpListener,
     config: Config,
     file_provider: Option<(ProviderObject, FileTransferConfig)>,
+    ip_filter: IpFilter,
 }
 
 impl Server104 {
     pub async fn bind(addr: SocketAddr, config: Config) -> Result<Self> {
+        Self::bind_with_security(addr, config, IpFilter::allow_all()).await
+    }
+
+    /// Bind a server with an [`IpFilter`] applied to every accept. Peers whose
+    /// IP does not match are silently dropped (TCP FIN), logged at `warn`,
+    /// and the accept loop continues — the filter is not visible to callers
+    /// as an [`Err`].
+    ///
+    /// `IpFilter::allow_all()` (the default used by [`Self::bind`]) preserves
+    /// the historical behaviour of accepting every peer.
+    pub async fn bind_with_security(
+        addr: SocketAddr,
+        config: Config,
+        ip_filter: IpFilter,
+    ) -> Result<Self> {
         let listener = TcpListener::bind(addr).await?;
         Ok(Self {
             listener,
             config,
             file_provider: None,
+            ip_filter,
         })
     }
 
@@ -64,7 +82,14 @@ impl Server104 {
         mut policy: AsduPolicy,
         handler: H,
     ) -> Result<ServerConnection> {
-        let (stream, peer) = self.listener.accept().await?;
+        let (stream, peer) = loop {
+            let (stream, peer) = self.listener.accept().await?;
+            if self.ip_filter.contains(peer) {
+                break (stream, peer);
+            }
+            tracing::warn!(%peer, "iec60870: peer rejected by ip filter");
+            drop(stream);
+        };
         stream.set_nodelay(true)?;
         // If a provider is configured, widen the policy so FT ASDUs aren't dropped.
         if self.file_provider.is_some() && policy.is_restrictive() {

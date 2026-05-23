@@ -257,23 +257,6 @@ pub enum ServerEvent {
 }
 
 impl ServerConnection {
-    /// Spawn a server-side driver around an already-established stream
-    /// (plain TCP or TLS). Used internally so the plain-TCP and TLS paths
-    /// produce the same handle type.
-    pub(crate) fn spawn<S, H>(
-        stream: S,
-        peer: SocketAddr,
-        config: Config,
-        policy: AsduPolicy,
-        handler: H,
-    ) -> Self
-    where
-        S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-        H: EventHandler,
-    {
-        Self::spawn_with_ft(stream, peer, config, policy, handler, None)
-    }
-
     pub(crate) fn spawn_with_ft<S, H>(
         stream: S,
         peer: SocketAddr,

@@ -279,9 +279,15 @@ impl ServerHandler {
             if !state.image.set(ioa, value, quality) {
                 return Response::err(format!("IOA {ioa} not found"));
             }
-            let entry = state.image.get(ioa).unwrap();
+            let entry = state.image.get(ioa).unwrap().clone();
             let coa = state.coa;
-            encode_point(ioa, entry, Cot::with(Cause::SPONTANEOUS), coa)
+            let bytes = encode_point(ioa, &entry, Cot::with(Cause::SPONTANEOUS), coa);
+            // Baseline tracks any outgoing ASDU carrying the value.
+            let (val, qds) = iec60870_test_tools::points::entry_to_monitored(&entry);
+            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                tracing::error!(?e, ioa, "deadband observe error in handle_set");
+            }
+            bytes
         };
 
         if let Some(bytes) = bytes {
@@ -378,7 +384,7 @@ fn encode_asdu_bytes<P: AsduPayload>(payload: &P, cot: Cot, ca: CommonAddress) -
 // ---------------------------------------------------------------------------
 
 async fn respond_interrogation_general(
-    state: &DaemonState,
+    state: &mut DaemonState,
     send: &dyn AsduSender,
     event_tx: &broadcast::Sender<Event>,
 ) {
@@ -395,10 +401,21 @@ async fn respond_interrogation_general(
     let mut ioas: Vec<u32> = state.image.iter().map(|(ioa, _)| ioa).collect();
     ioas.sort_unstable();
     for ioa in ioas {
-        if let Some(entry) = state.image.get(ioa) {
-            if let Some(bytes) =
-                encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca)
-            {
+        // Snapshot what we need from the image, then drop the immutable
+        // borrow so we can mutate `state.tracker` afterwards.
+        let snapshot = state
+            .image
+            .get(ioa)
+            .map(|entry| {
+                let bytes = encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca);
+                let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+                (bytes, val, qds)
+            });
+        if let Some((bytes_opt, val, qds)) = snapshot {
+            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                tracing::error!(?e, ioa, "deadband observe error in GI");
+            }
+            if let Some(bytes) = bytes_opt {
                 let _ = send.send(bytes).await;
             }
         }
@@ -420,7 +437,7 @@ async fn respond_interrogation_general(
 }
 
 async fn respond_interrogation_group(
-    state: &DaemonState,
+    state: &mut DaemonState,
     send: &dyn AsduSender,
     group: u8,
     _event_tx: &broadcast::Sender<Event>,
@@ -440,8 +457,19 @@ async fn respond_interrogation_group(
         let mut ioas: Vec<u32> = state.image.iter_kind(kind).map(|(ioa, _)| ioa).collect();
         ioas.sort_unstable();
         for ioa in ioas {
-            if let Some(entry) = state.image.get(ioa) {
-                if let Some(bytes) = encode_point(ioa, entry, cot_group, ca) {
+            let snapshot = state
+                .image
+                .get(ioa)
+                .map(|entry| {
+                    let bytes = encode_point(ioa, entry, cot_group, ca);
+                    let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+                    (bytes, val, qds)
+                });
+            if let Some((bytes_opt, val, qds)) = snapshot {
+                if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                    tracing::error!(?e, ioa, "deadband observe error in group interrogation");
+                }
+                if let Some(bytes) = bytes_opt {
                     let _ = send.send(bytes).await;
                 }
             }
@@ -555,12 +583,12 @@ async fn handle_incoming_asdu(
                     .first()
                     .map(|(_, q)| *q)
                     .unwrap_or(iec60870::proto::asdu::types::Qoi::GENERAL);
-                let s = state.read().await;
+                let mut s = state.write().await;
                 if qoi == iec60870::proto::asdu::types::Qoi::GENERAL {
-                    respond_interrogation_general(&s, send, event_tx).await;
+                    respond_interrogation_general(&mut s, send, event_tx).await;
                 } else {
                     let group = qoi.0.saturating_sub(20);
-                    respond_interrogation_group(&s, send, group, event_tx).await;
+                    respond_interrogation_group(&mut s, send, group, event_tx).await;
                 }
             }
         }

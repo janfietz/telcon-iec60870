@@ -39,12 +39,19 @@ proptest! {
         }
     }
 
-    /// Larger delta never increases the emit count for a fixed input
-    /// sequence.
+    /// For strictly monotonic step sequences (cur only grows), a larger
+    /// delta produces no more emits than a smaller one. We restrict the
+    /// input domain to non-negative steps because deadband emit counts
+    /// are NOT globally monotone in delta over arbitrary walks: deferring
+    /// an emit anchors the baseline at a stale value, and a later swing
+    /// past it can produce more emits than a smaller delta would have.
+    /// (The canonical counterexample is steps [0, 0, 0, +5.7, +3.7, −6.7]
+    /// at delta=4.05 vs 5.97 → 1 emit vs 2 emits.) The monotonic-walk
+    /// restriction keeps the property meaningful and testable.
     #[test]
-    fn larger_delta_emits_no_more_often(
+    fn larger_delta_emits_no_more_often_for_monotonic_walks(
         seed in -100.0_f32..100.0,
-        steps in proptest::collection::vec(-10.0_f32..10.0, 0..40),
+        steps in proptest::collection::vec(0.0_f32..10.0, 0..40),
         delta_small in 0.01_f64..5.0,
         bump in 0.01_f64..20.0,
     ) {
@@ -70,7 +77,7 @@ proptest! {
         let small = count_emits(seed, &steps, delta_small);
         let large = count_emits(seed, &steps, delta_large);
         prop_assert!(large <= small,
-            "delta {} → {} emits; delta {} → {} emits (must not grow)",
+            "delta {} → {} emits; delta {} → {} emits (must not grow on monotonic walk)",
             delta_small, small, delta_large, large);
     }
 

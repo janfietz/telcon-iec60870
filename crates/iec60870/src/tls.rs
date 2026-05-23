@@ -212,8 +212,8 @@ pub async fn tls_server_accept_with_policy<H: EventHandler>(
         .accept(stream)
         .await
         .map_err(|e| Error::Tls(format!("tls accept: {e}")))?;
-    Ok(ServerConnection::spawn(
-        tls_stream, peer, config, policy, handler,
+    Ok(ServerConnection::spawn_with_ft(
+        tls_stream, peer, config, policy, handler, None,
     ))
 }
 

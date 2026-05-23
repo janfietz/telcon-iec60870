@@ -48,6 +48,7 @@ mod master101;
 mod outstation101;
 mod policy;
 mod redundancy;
+pub mod security;
 mod server104;
 mod transport;
 
@@ -62,8 +63,15 @@ pub use error::{Error, Result};
 pub use handler::{DefaultLoggingHandler, EventHandler, NoopHandler};
 pub use policy::AsduPolicy;
 pub use redundancy::{RedundancyConfig, RedundancyServer};
+pub use security::{IpFilter, IpFilterParseError, SecurityConfig};
 pub use server104::{Server104, ServerConnection, ServerEvent, ServerEvents, ServerSender};
 pub use transport::{Transport, DEFAULT_PORT, DEFAULT_TLS_PORT};
+
+#[cfg(feature = "tls")]
+pub use security::{
+    fingerprint_sha256_of_pem_file, CertificateChain, ClientCertPolicy, CustomVerifierFn,
+    TlsSecurityConfig, VerifyError,
+};
 
 #[cfg(feature = "tls")]
 pub use tls::{

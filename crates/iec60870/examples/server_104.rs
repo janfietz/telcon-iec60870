@@ -1,11 +1,20 @@
 //! IEC 60870-5-104 outstation example.
 //!
-//! Binds 0.0.0.0:2404, accepts one connection, and answers a general
-//! interrogation with a few synthetic measurements. Run with:
+//! Binds 0.0.0.0:2404, accepts connections, and answers general interrogations
+//! with a few synthetic measurements. Run with:
 //!
 //! ```text
 //! RUST_LOG=iec60870=debug,iec60870::state=info cargo run --example server_104
 //! ```
+//!
+//! Set `IEC_ALLOW` to restrict who may connect, e.g.:
+//!
+//! ```text
+//! IEC_ALLOW="127.0.0.0/8,::1" cargo run --example server_104
+//! ```
+//!
+//! Peers outside the allow-list are silently dropped (FIN) before any
+//! protocol handling, with a `warn` log line naming the offending address.
 
 use std::net::Ipv4Addr;
 
@@ -16,7 +25,7 @@ use iec60870::proto::asdu::ie::{Qds, Quality, Siq, R32};
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_ME_NC_1, M_SP_NA_1};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
-use iec60870::{DefaultLoggingHandler, Server104, ServerEvent};
+use iec60870::{DefaultLoggingHandler, IpFilter, Server104, ServerEvent};
 
 fn encode<P: AsduPayload>(payload: &P, cot: Cot, vsq: Vsq) -> Vec<u8> {
     let asdu = Asdu::from_payload(cot, CommonAddress(1), vsq, payload, AsduAddressing::IEC104);
@@ -35,7 +44,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let bind = (Ipv4Addr::UNSPECIFIED, 2404).into();
-    let server = Server104::bind(bind, Config::default()).await?;
+    let ip_filter = match std::env::var("IEC_ALLOW") {
+        Ok(raw) => {
+            let entries: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let filter = IpFilter::from_strs(&entries)?;
+            tracing::info!(?entries, "IP allow-list active");
+            filter
+        }
+        Err(_) => IpFilter::allow_all(),
+    };
+    let server = Server104::bind_with_security(bind, Config::default(), ip_filter).await?;
     tracing::info!(addr = ?server.local_addr()?, "server listening");
 
     loop {

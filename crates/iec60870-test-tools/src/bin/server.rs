@@ -221,6 +221,10 @@ impl ControlHandler for ServerHandler {
             | Request::FileGet { .. }
             | Request::FilePut { .. } => Response::err("not a server op"),
             Request::Events => Response::err("use subscribe_events"),
+            // Server-side ops added in Task 7; handlers land in Task 10.
+            Request::SetDeadband { .. } | Request::GetDeadband { .. } => {
+                Response::err("not implemented yet, Task 10")
+            }
         }
     }
 

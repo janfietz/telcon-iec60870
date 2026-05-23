@@ -183,6 +183,48 @@ pub enum SimSchedule {
     },
 }
 
+/// Per-IOA deadband policy in JSON wire form. Maps 1:1 to
+/// `iec60870::DeadbandPolicy`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeadbandPolicyWire {
+    /// No deadband — every observation emits.
+    None,
+    /// Emit when |new − last| ≥ delta.
+    Absolute { delta: f64 },
+    /// Emit when |new − last| ≥ (pct/100) * max(|last|, floor).
+    Percent { pct: f32, floor: f64 },
+}
+
+impl DeadbandPolicyWire {
+    /// Map this wire form to the core-crate `DeadbandPolicy`. Kept here
+    /// so the binaries don't need to import both modules just to convert.
+    pub fn into_policy(self) -> iec60870::DeadbandPolicy {
+        match self {
+            DeadbandPolicyWire::None => iec60870::DeadbandPolicy::None,
+            DeadbandPolicyWire::Absolute { delta } => {
+                iec60870::DeadbandPolicy::Absolute { delta }
+            }
+            DeadbandPolicyWire::Percent { pct, floor } => {
+                iec60870::DeadbandPolicy::Percent { pct, floor }
+            }
+        }
+    }
+
+    /// Inverse of `into_policy`.
+    pub fn from_policy(p: iec60870::DeadbandPolicy) -> Self {
+        match p {
+            iec60870::DeadbandPolicy::None => DeadbandPolicyWire::None,
+            iec60870::DeadbandPolicy::Absolute { delta } => {
+                DeadbandPolicyWire::Absolute { delta }
+            }
+            iec60870::DeadbandPolicy::Percent { pct, floor } => {
+                DeadbandPolicyWire::Percent { pct, floor }
+            }
+        }
+    }
+}
+
 /// Control-plane request. Discriminated by `op`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -207,6 +249,15 @@ pub enum Request {
     SimSet {
         ioa: u32,
         schedule: SimSchedule,
+    },
+    /// Set the per-IOA deadband policy.
+    SetDeadband {
+        ioa: u32,
+        policy: DeadbandPolicyWire,
+    },
+    /// Read the per-IOA deadband policy.
+    GetDeadband {
+        ioa: u32,
     },
 
     // -- client side --

@@ -629,7 +629,9 @@ impl ControlHandler for ClientHandler {
             | Request::Set { .. }
             | Request::List { .. }
             | Request::SimGet { .. }
-            | Request::SimSet { .. } => Response::err("not a client op"),
+            | Request::SimSet { .. }
+            | Request::SetDeadband { .. }
+            | Request::GetDeadband { .. } => Response::err("not a client op"),
             Request::Events => {
                 // Handled by the control::serve loop directly.
                 Response::err("internal: events handled by serve loop")

@@ -61,6 +61,8 @@ enum CliCommand {
     List(ListArgs),
     /// Simulator sub-commands.
     Sim(SimArgs),
+    /// Deadband sub-commands.
+    Deadband(DeadbandArgs),
     /// Stream events as NDJSON.
     Events,
     /// Show daemon status.
@@ -135,6 +137,38 @@ struct SimSetArgs {
     /// JSON schedule (e.g. `{"kind":"toggle","interval_ms":5000}`).
     #[arg(long)]
     schedule: String,
+}
+
+#[derive(Args, Debug)]
+struct DeadbandArgs {
+    #[command(subcommand)]
+    command: DeadbandSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum DeadbandSubcommand {
+    /// Read one IOA's deadband policy.
+    Get(DeadbandGetArgs),
+    /// Set one IOA's deadband policy.
+    Set(DeadbandSetArgs),
+}
+
+#[derive(Args, Debug)]
+struct DeadbandGetArgs {
+    #[arg(long)]
+    ioa: u32,
+}
+
+#[derive(Args, Debug)]
+struct DeadbandSetArgs {
+    #[arg(long)]
+    ioa: u32,
+    /// JSON policy, e.g.:
+    ///   `{"kind":"none"}`
+    ///   `{"kind":"absolute","delta":0.5}`
+    ///   `{"kind":"percent","pct":5.0,"floor":0.001}`
+    #[arg(long)]
+    policy: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +258,8 @@ impl ControlHandler for ServerHandler {
             | Request::FileGet { .. }
             | Request::FilePut { .. } => Response::err("not a server op"),
             Request::Events => Response::err("use subscribe_events"),
-            // Server-side ops added in Task 7; handlers land in Task 10.
-            Request::SetDeadband { .. } | Request::GetDeadband { .. } => {
-                Response::err("not implemented yet, Task 10")
-            }
+            Request::SetDeadband { ioa, policy } => self.handle_set_deadband(ioa, policy).await,
+            Request::GetDeadband { ioa } => self.handle_get_deadband(ioa).await,
         }
     }
 
@@ -363,6 +395,26 @@ impl ServerHandler {
             "points": points,
             "uptime_s": uptime_s,
         }))
+    }
+
+    async fn handle_set_deadband(
+        &self,
+        ioa: u32,
+        policy: iec60870_test_tools::wire::DeadbandPolicyWire,
+    ) -> Response {
+        let mut state = self.state.write().await;
+        state
+            .tracker
+            .set_policy(iec60870_proto::asdu::Ioa(ioa), policy.into_policy());
+        Response::ok_empty()
+    }
+
+    async fn handle_get_deadband(&self, ioa: u32) -> Response {
+        let state = self.state.read().await;
+        let policy = state.tracker.policy(iec60870_proto::asdu::Ioa(ioa));
+        let wire = iec60870_test_tools::wire::DeadbandPolicyWire::from_policy(policy);
+        let data = serde_json::json!({ "ioa": ioa, "policy": wire });
+        Response::ok(data)
     }
 }
 
@@ -1273,6 +1325,17 @@ async fn main() -> anyhow::Result<()> {
                 let schedule: SimSchedule = serde_json::from_str(&a.schedule)
                     .map_err(|e| anyhow::anyhow!("invalid schedule JSON: {e}"))?;
                 client_call(&socket, &Request::SimSet { ioa: a.ioa, schedule }).await?;
+            }
+        },
+        CliCommand::Deadband(args) => match args.command {
+            DeadbandSubcommand::Get(g) => {
+                client_call(&socket, &Request::GetDeadband { ioa: g.ioa }).await?;
+            }
+            DeadbandSubcommand::Set(s) => {
+                let policy: iec60870_test_tools::wire::DeadbandPolicyWire =
+                    serde_json::from_str(&s.policy)
+                        .map_err(|e| anyhow::anyhow!("invalid policy JSON: {e}"))?;
+                client_call(&socket, &Request::SetDeadband { ioa: s.ioa, policy }).await?;
             }
         },
         CliCommand::Events => {

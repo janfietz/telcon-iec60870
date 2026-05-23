@@ -195,10 +195,14 @@ wraps it as `Qds { overflow: false, quality }`.
 In order:
 
 1. **No baseline yet** → `Emit`, store new baseline.
-2. **Quality bits differ from baseline quality** → `Emit`, store new baseline.
-3. **Value kind ≠ baseline kind** → `Err(KindMismatch)`, baseline
-   untouched. (`observe` follows the same rule.)
-4. **Policy is `None`** → `Emit`, store new baseline.
+2. **Value kind ≠ baseline kind** → `Err(KindMismatch)`, baseline
+   untouched. (`observe` follows the same rule.) Checked *before* quality
+   so that a quality-flip coincident with a wrong-kind value doesn't
+   accidentally store a mismatched baseline.
+3. **Quality bits differ from baseline quality** → `Emit`, store new baseline.
+4. **Policy is `None`** → emit only if value or quality differs from
+   baseline (already covered by rules 1–3; same-value same-quality →
+   `Suppress`).
 5. **Policy is `Absolute` / `Percent`** → kind-specific comparator.
 
 ### Kind-specific comparators
@@ -316,7 +320,7 @@ Sans-I/O, no async, all in one file alongside the implementation:
 | `absolute_below_threshold_suppresses` | Float, baseline 100.0, new 100.4, delta 0.5 → `Suppress`, baseline unchanged. |
 | `absolute_at_threshold_emits` | Same setup, new 100.5 → `Emit`, baseline 100.5. |
 | `percent_evaluates_against_last_emitted` | Float, baseline 100.0, pct 5%, floor 0.001: 104.9 → `Suppress`; 105.0 → `Emit`. Then baseline=105.0: 110.2 → `Suppress`; 110.25 → `Emit`. |
-| `percent_floor_kicks_in_near_zero` | Float, baseline 0.0, pct 5%, floor 1.0: 0.4 → `Suppress`; 0.5 → `Emit`. |
+| `percent_floor_kicks_in_near_zero` | Float, baseline 0.0, pct 5%, floor 1.0 → threshold 0.05: 0.04 → `Suppress`; 0.05 → `Emit`. |
 | `single_transition_always_emits_regardless_of_policy` | Single(false) → Single(true) with `Absolute { delta: 999.0 }` → `Emit`. |
 | `double_no_transition_suppresses` | Same `DoublePoint::On` with `Absolute { delta: 0.0 }` → `Suppress`. |
 | `scaled_integer_math_no_overflow` | i16::MIN to i16::MAX distance equals 65535 in f64. |

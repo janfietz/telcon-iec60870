@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn observe_kind_mismatch_returns_error() {
+    fn observe_kind_mismatch_returns_error_and_keeps_baseline() {
         let mut t = DeadbandTracker::new();
         t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
         let err = t.observe(Ioa(1), MonitoredValue::Scaled(1), qds()).unwrap_err();
@@ -600,6 +600,13 @@ mod tests {
                 expected: ValueKind::Float,
                 actual: ValueKind::Scaled,
             }
+        );
+        // Baseline must still be the original Float(1.0): an evaluate with the
+        // same Float value + same quality should Suppress, proving the
+        // baseline was not corrupted by the failed observe.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            EmitDecision::Suppress
         );
     }
 }

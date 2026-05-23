@@ -146,8 +146,8 @@ impl DeadbandTracker {
             return Ok(EmitDecision::Emit);
         };
 
-        // Rule 3 (checked before quality so we don't accidentally "emit" a
-        // wrong-kind sample): kind mismatch is an error; baseline untouched.
+        // Rule 2: kind mismatch (checked before quality so we don't accidentally
+        // "emit" a wrong-kind sample) — error; baseline untouched.
         if baseline.value.kind() != value.kind() {
             return Err(DeadbandError::KindMismatch {
                 ioa,
@@ -156,7 +156,7 @@ impl DeadbandTracker {
             });
         }
 
-        // Rule 2: quality bits differ → always emit.
+        // Rule 3: quality bits differ → always emit.
         if baseline.quality != quality {
             self.baselines.insert(ioa, Baseline { value, quality });
             return Ok(EmitDecision::Emit);
@@ -173,9 +173,60 @@ impl DeadbandTracker {
             return Ok(EmitDecision::Emit);
         }
 
-        // Rule 5: threshold comparator — implemented in Task 4.
-        let _ = policy;
-        unimplemented!("threshold comparator, Task 4")
+        // Rule 5: threshold comparator.
+        let crosses = threshold_crossed(baseline.value, value, policy);
+
+        if crosses {
+            self.baselines.insert(ioa, Baseline { value, quality });
+            Ok(EmitDecision::Emit)
+        } else {
+            Ok(EmitDecision::Suppress)
+        }
+    }
+}
+
+/// Compute whether `new` is far enough from `old` for the given policy.
+/// Caller has already established that the kinds match. Single/Double
+/// short-circuit any-change semantics here; the threshold is ignored.
+fn threshold_crossed(
+    old: MonitoredValue,
+    new: MonitoredValue,
+    policy: DeadbandPolicy,
+) -> bool {
+    use MonitoredValue::*;
+    // Single/Double: any transition.
+    match (old, new) {
+        (Single(a), Single(b)) => return a != b,
+        (Double(a), Double(b)) => return a != b,
+        _ => {}
+    }
+
+    // Numeric kinds. NaN/non-finite transitions count as changes.
+    let (a, b) = match (old, new) {
+        (Normalized(a), Normalized(b)) | (Float(a), Float(b)) => (f64::from(a), f64::from(b)),
+        (Scaled(a), Scaled(b)) => (f64::from(a), f64::from(b)),
+        _ => unreachable!("kinds checked by caller"),
+    };
+
+    if a.is_nan() != b.is_nan() {
+        return true;
+    }
+    if a.is_finite() != b.is_finite() {
+        return true;
+    }
+    if a.is_nan() && b.is_nan() {
+        // Both NaN — no observable change.
+        return false;
+    }
+
+    let dist = (b - a).abs();
+    match policy {
+        DeadbandPolicy::None => dist > 0.0, // unreachable in practice (handled earlier)
+        DeadbandPolicy::Absolute { delta } => dist >= delta,
+        DeadbandPolicy::Percent { pct, floor } => {
+            let ref_mag = old.magnitude().max(floor);
+            dist >= (f64::from(pct) / 100.0) * ref_mag
+        }
     }
 }
 
@@ -320,6 +371,168 @@ mod tests {
         assert_eq!(
             t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
             EmitDecision::Suppress
+        );
+    }
+
+    // --- Absolute ---------------------------------------------------------
+
+    #[test]
+    fn absolute_below_threshold_suppresses() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    #[test]
+    fn absolute_at_threshold_emits_and_updates_baseline() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.5), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+        // Baseline now 100.5; 100.9 (delta 0.4) suppresses.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.9), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    // --- Percent ----------------------------------------------------------
+
+    #[test]
+    fn percent_evaluates_against_last_emitted() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Percent { pct: 5.0, floor: 0.001 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        // 4.9% drift → suppress.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(104.9), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+        // 5.0% drift → emit.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(105.0), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+        // New baseline 105.0; 110.0 is 4.76% → suppress.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(110.0), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+        // 110.26 is 5.01% from 105.0 → emit.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(110.26), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn percent_floor_kicks_in_near_zero() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Percent { pct: 5.0, floor: 1.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(0.0), qds()).unwrap();
+        // Threshold = 0.05 * max(0, 1) = 0.05.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(0.04), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(0.05), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    // --- Single / Double short-circuit ------------------------------------
+
+    #[test]
+    fn single_transition_always_emits_regardless_of_threshold() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Single(false), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Single(true), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn double_no_transition_suppresses_with_threshold() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+    }
+
+    // --- Scaled / Normalized ----------------------------------------------
+
+    #[test]
+    fn scaled_integer_distance_no_overflow() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 65_535.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MIN), qds()).unwrap();
+        // Distance = 65535 → emits at the threshold.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MAX), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn normalized_absolute_threshold() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.1 });
+        t.evaluate(Ioa(1), MonitoredValue::Normalized(0.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.09), qds()).unwrap(),
+            EmitDecision::Suppress
+        );
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.1), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    // --- NaN / non-finite -------------------------------------------------
+
+    #[test]
+    fn nan_to_finite_transition_emits() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn finite_to_nan_transition_emits() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn infinity_transition_emits() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(f32::INFINITY), qds()).unwrap(),
+            EmitDecision::Emit
         );
     }
 }

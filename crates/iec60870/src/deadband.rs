@@ -113,6 +113,41 @@ impl DeadbandTracker {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub fn set_policy(&mut self, ioa: Ioa, policy: DeadbandPolicy) {
+        self.policies.insert(ioa, policy);
+    }
+
+    pub fn policy(&self, ioa: Ioa) -> DeadbandPolicy {
+        self.policies.get(&ioa).copied().unwrap_or(DeadbandPolicy::None)
+    }
+
+    pub fn remove_policy(&mut self, ioa: Ioa) -> Option<DeadbandPolicy> {
+        self.policies.remove(&ioa)
+    }
+
+    pub fn forget(&mut self, ioa: Ioa) {
+        self.baselines.remove(&ioa);
+    }
+
+    pub fn clear(&mut self) {
+        self.baselines.clear();
+    }
+
+    pub fn evaluate(
+        &mut self,
+        ioa: Ioa,
+        value: MonitoredValue,
+        quality: Qds,
+    ) -> Result<EmitDecision, DeadbandError> {
+        // No baseline yet — first sample.
+        if !self.baselines.contains_key(&ioa) {
+            self.baselines.insert(ioa, Baseline { value, quality });
+            return Ok(EmitDecision::Emit);
+        }
+        // Placeholder until Tasks 3-4 fill it in.
+        unimplemented!("evaluate body, Tasks 3-4")
+    }
 }
 
 #[cfg(test)]
@@ -134,5 +169,60 @@ mod tests {
             .evaluate(Ioa(10), MonitoredValue::Float(1.0), qds())
             .expect("evaluate ok");
         assert_eq!(decision, EmitDecision::Emit);
+    }
+
+    #[test]
+    fn policy_defaults_to_none() {
+        let t = DeadbandTracker::new();
+        assert_eq!(t.policy(Ioa(99)), DeadbandPolicy::None);
+    }
+
+    #[test]
+    fn set_policy_and_read_back() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        assert_eq!(
+            t.policy(Ioa(1)),
+            DeadbandPolicy::Absolute { delta: 0.5 }
+        );
+    }
+
+    #[test]
+    fn remove_policy_returns_previous() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        let prev = t.remove_policy(Ioa(1));
+        assert_eq!(prev, Some(DeadbandPolicy::Absolute { delta: 0.5 }));
+        assert_eq!(t.policy(Ioa(1)), DeadbandPolicy::None);
+    }
+
+    #[test]
+    fn forget_drops_only_named_baseline() {
+        let mut t = DeadbandTracker::new();
+        let _ = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        let _ = t.evaluate(Ioa(2), MonitoredValue::Float(2.0), qds()).unwrap();
+        t.forget(Ioa(1));
+        // IOA 1's next evaluate is first-sample again.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            EmitDecision::Emit
+        );
+    }
+
+    #[test]
+    fn clear_drops_all_baselines_but_keeps_policies() {
+        let mut t = DeadbandTracker::new();
+        t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
+        let _ = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.clear();
+        assert_eq!(
+            t.policy(Ioa(1)),
+            DeadbandPolicy::Absolute { delta: 0.5 }
+        );
+        // Baseline gone — first-sample again.
+        assert_eq!(
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            EmitDecision::Emit
+        );
     }
 }

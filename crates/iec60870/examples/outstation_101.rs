@@ -145,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(?reason, "link closed");
                 break;
             }
+            Ok(Some(_)) => {}
             Ok(None) => break,
             Err(_) => {
                 tracing::info!("idle timeout — exiting");

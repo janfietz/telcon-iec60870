@@ -136,6 +136,7 @@ impl Outstation101 {
 
 /// Events surfaced to the application by [`Outstation101::recv`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Outstation101Event {
     /// An ASDU was received from the master.
     Asdu(Vec<u8>),

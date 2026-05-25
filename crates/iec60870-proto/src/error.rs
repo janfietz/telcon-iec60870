@@ -5,6 +5,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// Errors produced by codecs and state machines in this crate.
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     #[error("buffer too short: needed {needed} bytes, had {have}")]
     Incomplete { needed: usize, have: usize },

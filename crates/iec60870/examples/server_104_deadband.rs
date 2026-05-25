@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
                         info!(?reason, "connection closed");
                         break;
                     }
+                    _ => {}
                 }
             }
         });

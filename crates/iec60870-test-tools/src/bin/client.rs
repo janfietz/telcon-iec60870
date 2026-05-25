@@ -1235,6 +1235,7 @@ async fn run_client104(
                         });
                         break;
                     }
+                    Some(_) => {}
                     None => break,
                 }
             }
@@ -1289,6 +1290,7 @@ async fn run_master101(
                         });
                         break;
                     }
+                    Some(_) => {}
                     None => break,
                 }
             }

@@ -828,6 +828,7 @@ async fn run_104_peer(
                 tracing::info!(?reason, %peer, "peer disconnected");
                 break;
             }
+            Some(_) => {}
             None => break,
         }
     }
@@ -907,6 +908,7 @@ async fn run_101_outstation(
                         tracing::info!(?r, "101 link closed");
                         break;
                     }
+                    Some(_) => {}
                     None => break,
                 }
             }

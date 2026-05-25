@@ -151,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(?reason, "link closed");
                 break;
             }
+            _ => {}
         }
 
         // Small delay between polls to avoid flooding the bus.

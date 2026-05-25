@@ -267,6 +267,7 @@ impl Client104 {
 
 /// Events surfaced to the application by [`Client104::recv`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ClientEvent {
     Asdu(Vec<u8>),
     StateChanged(State),

@@ -79,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(?reason, "connection closed");
                 break;
             }
+            _ => {}
         }
     }
     Ok(())

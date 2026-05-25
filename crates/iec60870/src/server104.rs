@@ -250,6 +250,7 @@ impl ServerEvents {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ServerEvent {
     Asdu(Vec<u8>),
     StateChanged(State),

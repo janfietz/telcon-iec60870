@@ -158,6 +158,7 @@ impl Master101 {
 
 /// Events surfaced to the application by [`Master101::recv`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Master101Event {
     /// An ASDU was delivered from the outstation.
     Asdu(Vec<u8>),

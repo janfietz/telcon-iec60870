@@ -464,6 +464,7 @@ dependencies = [
  "bytes",
  "iec60870-proto",
  "ipnet",
+ "proptest",
  "rcgen",
  "rustls",
  "rustls-pemfile",

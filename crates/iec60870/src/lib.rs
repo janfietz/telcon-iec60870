@@ -39,6 +39,7 @@
 pub use iec60870_proto as proto;
 
 mod client104;
+mod deadband;
 mod driver;
 mod driver101;
 mod error;
@@ -59,6 +60,9 @@ mod tls;
 pub mod serial;
 
 pub use client104::{Client104, ClientEvent};
+pub use deadband::{
+    DeadbandError, DeadbandPolicy, DeadbandTracker, EmitDecision, MonitoredValue, ValueKind,
+};
 pub use error::{Error, Result};
 pub use handler::{DefaultLoggingHandler, EventHandler, NoopHandler};
 pub use policy::AsduPolicy;

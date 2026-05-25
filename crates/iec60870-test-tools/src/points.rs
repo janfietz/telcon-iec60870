@@ -495,6 +495,30 @@ pub fn populate_default(image: &mut ProcessImage) {
     }
 }
 
+/// Convert this entry's value and quality into the kind-agnostic forms
+/// the core `iec60870::DeadbandTracker` consumes.
+pub fn entry_to_monitored(entry: &PointEntry) -> (iec60870::MonitoredValue, iec60870::proto::asdu::ie::Qds) {
+    use iec60870::MonitoredValue;
+    let value = match (entry.kind, &entry.value) {
+        (PointKind::SpNa | PointKind::SpTb, PointValue::Single(b)) => MonitoredValue::Single(*b),
+        (PointKind::DpNa | PointKind::DpTb, PointValue::Double(dpw)) => {
+            MonitoredValue::Double(match dpw {
+                DoublePointWire::Intermediate => iec60870::proto::asdu::ie::DoublePoint::Intermediate,
+                DoublePointWire::Off => iec60870::proto::asdu::ie::DoublePoint::Off,
+                DoublePointWire::On => iec60870::proto::asdu::ie::DoublePoint::On,
+                DoublePointWire::Indeterminate => iec60870::proto::asdu::ie::DoublePoint::Indeterminate,
+            })
+        }
+        (PointKind::MeNa | PointKind::MeTd, PointValue::Normalized(f)) => MonitoredValue::Normalized(*f),
+        (PointKind::MeNb | PointKind::MeTe, PointValue::Scaled(s)) => MonitoredValue::Scaled(*s),
+        (PointKind::MeNc | PointKind::MeTf, PointValue::Float(f)) => MonitoredValue::Float(*f),
+        // Fallback for value/kind mismatch in the image — shouldn't happen.
+        _ => MonitoredValue::Single(false),
+    };
+    let qds = qds_from_wire(entry.quality);
+    (value, qds)
+}
+
 /// Map a group interrogation qualifier (Qoi 21..=36) to the `PointKind`
 /// that belongs to that group in our IOA layout.
 pub fn kind_for_group(group: u8) -> Option<PointKind> {

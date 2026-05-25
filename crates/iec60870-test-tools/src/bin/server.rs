@@ -61,6 +61,8 @@ enum CliCommand {
     List(ListArgs),
     /// Simulator sub-commands.
     Sim(SimArgs),
+    /// Deadband sub-commands.
+    Deadband(DeadbandArgs),
     /// Stream events as NDJSON.
     Events,
     /// Show daemon status.
@@ -137,6 +139,38 @@ struct SimSetArgs {
     schedule: String,
 }
 
+#[derive(Args, Debug)]
+struct DeadbandArgs {
+    #[command(subcommand)]
+    command: DeadbandSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum DeadbandSubcommand {
+    /// Read one IOA's deadband policy.
+    Get(DeadbandGetArgs),
+    /// Set one IOA's deadband policy.
+    Set(DeadbandSetArgs),
+}
+
+#[derive(Args, Debug)]
+struct DeadbandGetArgs {
+    #[arg(long)]
+    ioa: u32,
+}
+
+#[derive(Args, Debug)]
+struct DeadbandSetArgs {
+    #[arg(long)]
+    ioa: u32,
+    /// JSON policy, e.g.:
+    ///   `{"kind":"none"}`
+    ///   `{"kind":"absolute","delta":0.5}`
+    ///   `{"kind":"percent","pct":5.0,"floor":0.001}`
+    #[arg(long)]
+    policy: String,
+}
+
 // ---------------------------------------------------------------------------
 // Daemon shared state
 // ---------------------------------------------------------------------------
@@ -150,6 +184,8 @@ struct PeerEntry {
 /// All mutable daemon state behind a single `RwLock`.
 struct DaemonState {
     image: ProcessImage,
+    /// Per-IOA deadband state for gating spontaneous emissions.
+    tracker: iec60870::DeadbandTracker,
     /// 104 peers keyed by `SocketAddr`. Empty for 101.
     peers: HashMap<SocketAddr, PeerEntry>,
     /// 101 send channel. `None` for 104.
@@ -165,6 +201,7 @@ impl DaemonState {
         populate_default(&mut image);
         Self {
             image,
+            tracker: iec60870::DeadbandTracker::new(),
             peers: HashMap::new(),
             outstation_tx: None,
             start_time: Instant::now(),
@@ -221,6 +258,8 @@ impl ControlHandler for ServerHandler {
             | Request::FileGet { .. }
             | Request::FilePut { .. } => Response::err("not a server op"),
             Request::Events => Response::err("use subscribe_events"),
+            Request::SetDeadband { ioa, policy } => self.handle_set_deadband(ioa, policy).await,
+            Request::GetDeadband { ioa } => self.handle_get_deadband(ioa).await,
         }
     }
 
@@ -272,9 +311,15 @@ impl ServerHandler {
             if !state.image.set(ioa, value, quality) {
                 return Response::err(format!("IOA {ioa} not found"));
             }
-            let entry = state.image.get(ioa).unwrap();
+            let entry = state.image.get(ioa).unwrap().clone();
             let coa = state.coa;
-            encode_point(ioa, entry, Cot::with(Cause::SPONTANEOUS), coa)
+            let bytes = encode_point(ioa, &entry, Cot::with(Cause::SPONTANEOUS), coa);
+            // Baseline tracks any outgoing ASDU carrying the value.
+            let (val, qds) = iec60870_test_tools::points::entry_to_monitored(&entry);
+            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                tracing::error!(?e, ioa, "deadband observe error in handle_set");
+            }
+            bytes
         };
 
         if let Some(bytes) = bytes {
@@ -351,6 +396,26 @@ impl ServerHandler {
             "uptime_s": uptime_s,
         }))
     }
+
+    async fn handle_set_deadband(
+        &self,
+        ioa: u32,
+        policy: iec60870_test_tools::wire::DeadbandPolicyWire,
+    ) -> Response {
+        let mut state = self.state.write().await;
+        state
+            .tracker
+            .set_policy(iec60870_proto::asdu::Ioa(ioa), policy.into_policy());
+        Response::ok_empty()
+    }
+
+    async fn handle_get_deadband(&self, ioa: u32) -> Response {
+        let state = self.state.read().await;
+        let policy = state.tracker.policy(iec60870_proto::asdu::Ioa(ioa));
+        let wire = iec60870_test_tools::wire::DeadbandPolicyWire::from_policy(policy);
+        let data = serde_json::json!({ "ioa": ioa, "policy": wire });
+        Response::ok(data)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +436,7 @@ fn encode_asdu_bytes<P: AsduPayload>(payload: &P, cot: Cot, ca: CommonAddress) -
 // ---------------------------------------------------------------------------
 
 async fn respond_interrogation_general(
-    state: &DaemonState,
+    state: &mut DaemonState,
     send: &dyn AsduSender,
     event_tx: &broadcast::Sender<Event>,
 ) {
@@ -388,10 +453,21 @@ async fn respond_interrogation_general(
     let mut ioas: Vec<u32> = state.image.iter().map(|(ioa, _)| ioa).collect();
     ioas.sort_unstable();
     for ioa in ioas {
-        if let Some(entry) = state.image.get(ioa) {
-            if let Some(bytes) =
-                encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca)
-            {
+        // Snapshot what we need from the image, then drop the immutable
+        // borrow so we can mutate `state.tracker` afterwards.
+        let snapshot = state
+            .image
+            .get(ioa)
+            .map(|entry| {
+                let bytes = encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca);
+                let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+                (bytes, val, qds)
+            });
+        if let Some((bytes_opt, val, qds)) = snapshot {
+            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                tracing::error!(?e, ioa, "deadband observe error in GI");
+            }
+            if let Some(bytes) = bytes_opt {
                 let _ = send.send(bytes).await;
             }
         }
@@ -413,7 +489,7 @@ async fn respond_interrogation_general(
 }
 
 async fn respond_interrogation_group(
-    state: &DaemonState,
+    state: &mut DaemonState,
     send: &dyn AsduSender,
     group: u8,
     _event_tx: &broadcast::Sender<Event>,
@@ -433,8 +509,19 @@ async fn respond_interrogation_group(
         let mut ioas: Vec<u32> = state.image.iter_kind(kind).map(|(ioa, _)| ioa).collect();
         ioas.sort_unstable();
         for ioa in ioas {
-            if let Some(entry) = state.image.get(ioa) {
-                if let Some(bytes) = encode_point(ioa, entry, cot_group, ca) {
+            let snapshot = state
+                .image
+                .get(ioa)
+                .map(|entry| {
+                    let bytes = encode_point(ioa, entry, cot_group, ca);
+                    let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+                    (bytes, val, qds)
+                });
+            if let Some((bytes_opt, val, qds)) = snapshot {
+                if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                    tracing::error!(?e, ioa, "deadband observe error in group interrogation");
+                }
+                if let Some(bytes) = bytes_opt {
                     let _ = send.send(bytes).await;
                 }
             }
@@ -548,12 +635,12 @@ async fn handle_incoming_asdu(
                     .first()
                     .map(|(_, q)| *q)
                     .unwrap_or(iec60870::proto::asdu::types::Qoi::GENERAL);
-                let s = state.read().await;
+                let mut s = state.write().await;
                 if qoi == iec60870::proto::asdu::types::Qoi::GENERAL {
-                    respond_interrogation_general(&s, send, event_tx).await;
+                    respond_interrogation_general(&mut s, send, event_tx).await;
                 } else {
                     let group = qoi.0.saturating_sub(20);
-                    respond_interrogation_group(&s, send, group, event_tx).await;
+                    respond_interrogation_group(&mut s, send, group, event_tx).await;
                 }
             }
         }
@@ -970,7 +1057,6 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
                 ticker.tick().await;
                 elapsed = elapsed.wrapping_add(1);
 
-                // Compute and store new value.
                 let (bytes, kind_str) = {
                     let mut s = state_tick.write().await;
                     let ca = s.coa;
@@ -982,24 +1068,40 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
                     if let Some(v) = advance_value(&schedule, current.as_ref(), elapsed) {
                         s.image.set(ioa, v, None);
                     }
-                    let bytes = s
-                        .image
-                        .get(ioa)
-                        .and_then(|e| encode_point(ioa, e, Cot::with(Cause::SPONTANEOUS), ca));
+                    // Read updated entry + decide via deadband.
+                    let (val, qds) = match s.image.get(ioa) {
+                        Some(e) => iec60870_test_tools::points::entry_to_monitored(e),
+                        None => return,
+                    };
+                    let decision = match s.tracker.evaluate(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!(?e, ioa, "deadband evaluate error");
+                            iec60870::EmitDecision::Suppress
+                        }
+                    };
                     let kind_str = s
                         .image
                         .get(ioa)
                         .map(|e| format!("{:?}", e.kind))
                         .unwrap_or_default();
+                    let bytes = if matches!(decision, iec60870::EmitDecision::Emit) {
+                        s.image
+                            .get(ioa)
+                            .and_then(|e| encode_point(ioa, e, Cot::with(Cause::SPONTANEOUS), ca))
+                    } else {
+                        None
+                    };
                     (bytes, kind_str)
                 };
 
-                // Broadcast spontaneous ASDU to all peers.
                 if let Some(bytes) = bytes {
                     let s = state_tick.read().await;
                     s.broadcast(bytes).await;
                 }
 
+                // Always emit the SimTick event so observers see ticks even
+                // when the value channel is suppressed by deadband.
                 let _ = event_tx_tick.send(Event::SimTick { ioa, kind: kind_str });
             }
         });
@@ -1223,6 +1325,17 @@ async fn main() -> anyhow::Result<()> {
                 let schedule: SimSchedule = serde_json::from_str(&a.schedule)
                     .map_err(|e| anyhow::anyhow!("invalid schedule JSON: {e}"))?;
                 client_call(&socket, &Request::SimSet { ioa: a.ioa, schedule }).await?;
+            }
+        },
+        CliCommand::Deadband(args) => match args.command {
+            DeadbandSubcommand::Get(g) => {
+                client_call(&socket, &Request::GetDeadband { ioa: g.ioa }).await?;
+            }
+            DeadbandSubcommand::Set(s) => {
+                let policy: iec60870_test_tools::wire::DeadbandPolicyWire =
+                    serde_json::from_str(&s.policy)
+                        .map_err(|e| anyhow::anyhow!("invalid policy JSON: {e}"))?;
+                client_call(&socket, &Request::SetDeadband { ioa: s.ioa, policy }).await?;
             }
         },
         CliCommand::Events => {

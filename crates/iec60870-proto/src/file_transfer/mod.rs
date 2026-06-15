@@ -17,7 +17,7 @@
 //! ASDU drives a reactive session.
 //!
 //! The state machine is deterministic and clock-driven: every public entry
-//! takes the current [`Instant`] explicitly.
+//! takes the current [`std::time::Instant`] explicitly.
 
 pub mod session;
 

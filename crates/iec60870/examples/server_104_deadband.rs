@@ -34,13 +34,13 @@ use tracing::{info, warn};
 
 use iec60870::proto::asdu::cot::{Cause, Cot};
 use iec60870::proto::asdu::header::{AsduAddressing, CommonAddress, Ioa, Vsq};
-use iec60870::proto::asdu::ie::{Nva, Qds, R32, Sva};
+use iec60870::proto::asdu::ie::{Nva, Qds, Sva, R32};
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_ME_NA_1, M_ME_NB_1, M_ME_NC_1};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
 use iec60870::{
-    DeadbandPolicy, DeadbandTracker, DefaultLoggingHandler, EmitDecision, IpFilter,
-    MonitoredValue, Server104, ServerEvent, ServerSender,
+    DeadbandPolicy, DeadbandTracker, DefaultLoggingHandler, EmitDecision, IpFilter, MonitoredValue,
+    Server104, ServerEvent, ServerSender,
 };
 
 const COA: CommonAddress = CommonAddress(1);
@@ -150,10 +150,7 @@ async fn main() -> anyhow::Result<()> {
 /// After each value ASDU goes out, `observe()` refreshes the deadband
 /// baseline. The next spontaneous candidate then compares against the
 /// freshly-emitted value rather than whatever was stored before GI.
-async fn respond_to_gi(
-    sender: &ServerSender,
-    state: &Arc<Mutex<Image>>,
-) -> iec60870::Result<()> {
+async fn respond_to_gi(sender: &ServerSender, state: &Arc<Mutex<Image>>) -> iec60870::Result<()> {
     sender
         .send(
             Cot::with(Cause::ACTIVATION_CON),
@@ -264,7 +261,12 @@ async fn simulate_tick(
     let scaled = img.scaled_val;
     let spontaneous = Cot::with(Cause::SPONTANEOUS);
 
-    let decision = decide(&mut img.tracker, IOA_FLOAT, MonitoredValue::Float(float), qds);
+    let decision = decide(
+        &mut img.tracker,
+        IOA_FLOAT,
+        MonitoredValue::Float(float),
+        qds,
+    );
     info!(ioa = ?IOA_FLOAT, value = float, ?decision, "tick");
     if matches!(decision, EmitDecision::Emit) {
         sender

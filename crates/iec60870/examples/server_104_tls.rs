@@ -121,7 +121,11 @@ async fn main() -> anyhow::Result<()> {
     let bind = (Ipv4Addr::UNSPECIFIED, 19998).into();
     let ip_filter = match std::env::var("IEC_ALLOW") {
         Ok(raw) => {
-            let entries: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let entries: Vec<&str> = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
             let filter = IpFilter::from_strs(&entries)?;
             tracing::info!(?entries, "IP allow-list active");
             filter
@@ -133,13 +137,9 @@ async fn main() -> anyhow::Result<()> {
     // on the IP allow-list before the TLS handshake runs. For full mTLS
     // hardening, use `TlsServer::bind_with_security(...)` with a
     // `TlsSecurityConfig` instead.
-    let server = TlsServer::bind_with_filter(
-        bind,
-        Arc::new(server_config),
-        Config::default(),
-        ip_filter,
-    )
-    .await?;
+    let server =
+        TlsServer::bind_with_filter(bind, Arc::new(server_config), Config::default(), ip_filter)
+            .await?;
     tracing::info!(addr = ?server.local_addr()?, "TLS server listening");
 
     loop {

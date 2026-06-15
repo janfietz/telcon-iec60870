@@ -17,7 +17,7 @@
 //! CRC-16/IBM is 16-bit so collisions are possible (one in 65 536 pairs in
 //! the worst case). By default the constructor returns
 //! [`FileTransferError::Collision`] when two files hash to the same NOF.
-//! Use [`FsFileTransferProvider::collision_strategy`] to pick `KeepFirst`
+//! Use [`FsFileTransferProvider::with_collision_strategy`] to pick `KeepFirst`
 //! or `KeepLast` instead.
 
 use std::collections::HashMap;
@@ -110,10 +110,9 @@ impl FsFileTransferProvider {
     pub async fn rescan(&self) -> Result<usize, FileTransferError> {
         let base = self.inner.base_dir.clone();
         let collision = self.inner.collision;
-        let new_index =
-            tokio::task::spawn_blocking(move || scan_dir(&base, collision)).await.map_err(
-                |e| FileTransferError::Other(format!("rescan join error: {e}")),
-            )??;
+        let new_index = tokio::task::spawn_blocking(move || scan_dir(&base, collision))
+            .await
+            .map_err(|e| FileTransferError::Other(format!("rescan join error: {e}")))??;
         let mut guard = self.inner.index.write().await;
         let count = new_index.len();
         *guard = new_index;
@@ -175,10 +174,7 @@ impl FileTransferProvider for FsFileTransferProvider {
         Ok(out)
     }
 
-    async fn lookup(
-        &self,
-        nof: NameOfFile,
-    ) -> Result<Option<FileMetadata>, FileTransferError> {
+    async fn lookup(&self, nof: NameOfFile) -> Result<Option<FileMetadata>, FileTransferError> {
         let path = match self.resolve(nof).await {
             Ok(p) => p,
             Err(FileTransferError::NotFound { .. }) => return Ok(None),
@@ -388,7 +384,11 @@ const CRC16_IBM_TABLE: [u16; 256] = {
         let mut c = i as u16;
         let mut j = 0;
         while j < 8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0xA001 } else { c >> 1 };
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0xA001
+            } else {
+                c >> 1
+            };
             j += 1;
         }
         table[i] = c;

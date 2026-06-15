@@ -26,9 +26,11 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_ME_NC_1, M_SP_NA_1};
-use iec60870::proto::asdu::{Asdu, AsduAddressing, AsduPayload, CommonAddress, Cot, Cause, Ioa, Vsq};
 use iec60870::proto::asdu::ie::{Qds, Quality, Siq, R32};
+use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_ME_NC_1, M_SP_NA_1};
+use iec60870::proto::asdu::{
+    Asdu, AsduAddressing, AsduPayload, Cause, CommonAddress, Cot, Ioa, Vsq,
+};
 use iec60870::proto::frame104::{Apdu, Codec, Config, UFunction};
 use iec60870::{Client104, ClientEvent, NoopHandler, Server104, ServerEvent, Transport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -299,7 +301,9 @@ async fn main() -> anyhow::Result<()> {
                                 Cot::with(Cause::ACTIVATION_CON),
                                 CommonAddress(1),
                                 Vsq::single(1),
-                                &C_IC_NA_1 { objects: vec![(Ioa(0), Qoi::GENERAL)] },
+                                &C_IC_NA_1 {
+                                    objects: vec![(Ioa(0), Qoi::GENERAL)],
+                                },
                             )
                             .await;
                         // One M_SP and one M_ME
@@ -311,7 +315,10 @@ async fn main() -> anyhow::Result<()> {
                                 &M_SP_NA_1 {
                                     objects: vec![(
                                         Ioa(100),
-                                        Siq { on: true, quality: Quality::default() },
+                                        Siq {
+                                            on: true,
+                                            quality: Quality::default(),
+                                        },
                                     )],
                                 },
                             )
@@ -332,7 +339,9 @@ async fn main() -> anyhow::Result<()> {
                                 Cot::with(Cause::ACTIVATION_TERMINATION),
                                 CommonAddress(1),
                                 Vsq::single(1),
-                                &C_IC_NA_1 { objects: vec![(Ioa(0), Qoi::GENERAL)] },
+                                &C_IC_NA_1 {
+                                    objects: vec![(Ioa(0), Qoi::GENERAL)],
+                                },
                             )
                             .await;
                     }
@@ -344,19 +353,17 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // ---- client connects through the tap --------------------------------
-    let mut client = Client104::connect_with(
-        Transport::tcp(tap_addr),
-        Config::default(),
-        NoopHandler,
-    )
-    .await?;
+    let mut client =
+        Client104::connect_with(Transport::tcp(tap_addr), Config::default(), NoopHandler).await?;
 
     client
         .send(
             Cot::with(Cause::ACTIVATION),
             CommonAddress(1),
             Vsq::single(1),
-            &C_IC_NA_1 { objects: vec![(Ioa(0), Qoi::GENERAL)] },
+            &C_IC_NA_1 {
+                objects: vec![(Ioa(0), Qoi::GENERAL)],
+            },
         )
         .await?;
 

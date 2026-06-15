@@ -18,9 +18,8 @@ use clap::{Args, Parser, Subcommand};
 use iec60870::proto::asdu::cot::{Cause, Cot};
 use iec60870::proto::asdu::header::{AsduAddressing, CommonAddress, Ioa, Vsq};
 use iec60870::proto::asdu::types::{
-    C_CI_NA_1, C_CS_NA_1, C_IC_NA_1, C_RC_NA_1, C_RD_NA_1, C_RP_NA_1, C_SC_NA_1, C_SC_TA_1,
-    C_SE_NA_1, C_SE_NB_1, C_SE_NC_1, C_SE_TA_1, C_SE_TB_1, C_SE_TC_1,
-    C_DC_NA_1,
+    C_CI_NA_1, C_CS_NA_1, C_DC_NA_1, C_IC_NA_1, C_RC_NA_1, C_RD_NA_1, C_RP_NA_1, C_SC_NA_1,
+    C_SC_TA_1, C_SE_NA_1, C_SE_NB_1, C_SE_NC_1, C_SE_TA_1, C_SE_TB_1, C_SE_TC_1,
 };
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::ServerSender;
@@ -237,9 +236,11 @@ impl ControlHandler for ServerHandler {
     async fn handle(&self, req: Request) -> Response {
         match req {
             Request::Get { ioa } => self.handle_get(ioa).await,
-            Request::Set { ioa, value, quality } => {
-                self.handle_set(ioa, value, quality).await
-            }
+            Request::Set {
+                ioa,
+                value,
+                quality,
+            } => self.handle_set(ioa, value, quality).await,
             Request::List { type_id } => self.handle_list(type_id).await,
             Request::SimGet { ioa } => self.handle_sim_get(ioa).await,
             Request::SimSet { ioa, schedule } => self.handle_sim_set(ioa, schedule).await,
@@ -316,7 +317,10 @@ impl ServerHandler {
             let bytes = encode_point(ioa, &entry, Cot::with(Cause::SPONTANEOUS), coa);
             // Baseline tracks any outgoing ASDU carrying the value.
             let (val, qds) = iec60870_test_tools::points::entry_to_monitored(&entry);
-            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+            if let Err(e) = state
+                .tracker
+                .observe(iec60870_proto::asdu::Ioa(ioa), val, qds)
+            {
                 tracing::error!(?e, ioa, "deadband observe error in handle_set");
             }
             bytes
@@ -455,16 +459,16 @@ async fn respond_interrogation_general(
     for ioa in ioas {
         // Snapshot what we need from the image, then drop the immutable
         // borrow so we can mutate `state.tracker` afterwards.
-        let snapshot = state
-            .image
-            .get(ioa)
-            .map(|entry| {
-                let bytes = encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca);
-                let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
-                (bytes, val, qds)
-            });
+        let snapshot = state.image.get(ioa).map(|entry| {
+            let bytes = encode_point(ioa, entry, Cot::with(Cause::INTERROGATED_GENERAL), ca);
+            let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+            (bytes, val, qds)
+        });
         if let Some((bytes_opt, val, qds)) = snapshot {
-            if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+            if let Err(e) = state
+                .tracker
+                .observe(iec60870_proto::asdu::Ioa(ioa), val, qds)
+            {
                 tracing::error!(?e, ioa, "deadband observe error in GI");
             }
             if let Some(bytes) = bytes_opt {
@@ -509,16 +513,16 @@ async fn respond_interrogation_group(
         let mut ioas: Vec<u32> = state.image.iter_kind(kind).map(|(ioa, _)| ioa).collect();
         ioas.sort_unstable();
         for ioa in ioas {
-            let snapshot = state
-                .image
-                .get(ioa)
-                .map(|entry| {
-                    let bytes = encode_point(ioa, entry, cot_group, ca);
-                    let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
-                    (bytes, val, qds)
-                });
+            let snapshot = state.image.get(ioa).map(|entry| {
+                let bytes = encode_point(ioa, entry, cot_group, ca);
+                let (val, qds) = iec60870_test_tools::points::entry_to_monitored(entry);
+                (bytes, val, qds)
+            });
             if let Some((bytes_opt, val, qds)) = snapshot {
-                if let Err(e) = state.tracker.observe(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                if let Err(e) = state
+                    .tracker
+                    .observe(iec60870_proto::asdu::Ioa(ioa), val, qds)
+                {
                     tracing::error!(?e, ioa, "deadband observe error in group interrogation");
                 }
                 if let Some(bytes) = bytes_opt {
@@ -647,7 +651,10 @@ async fn handle_incoming_asdu(
         // C_CI_NA_1 — counter interrogation (type 101)
         101 => {
             if let Ok(ci) = asdu.decode_payload::<C_CI_NA_1>(AsduAddressing::IEC104) {
-                let ack = C_CI_NA_1 { ioa: ci.ioa, qcc: ci.qcc };
+                let ack = C_CI_NA_1 {
+                    ioa: ci.ioa,
+                    qcc: ci.qcc,
+                };
                 let bytes = encode_asdu_bytes(&ack, Cot::with(Cause::ACTIVATION_CON), ca);
                 let _ = send.send(bytes).await;
             }
@@ -663,7 +670,10 @@ async fn handle_incoming_asdu(
         // C_CS_NA_1 — clock sync (type 103)
         103 => {
             if let Ok(cs) = asdu.decode_payload::<C_CS_NA_1>(AsduAddressing::IEC104) {
-                let ack = C_CS_NA_1 { ioa: cs.ioa, time: cs.time };
+                let ack = C_CS_NA_1 {
+                    ioa: cs.ioa,
+                    time: cs.time,
+                };
                 let bytes = encode_asdu_bytes(&ack, Cot::with(Cause::ACTIVATION_CON), ca);
                 let _ = send.send(bytes).await;
             }
@@ -671,7 +681,10 @@ async fn handle_incoming_asdu(
         // C_RP_NA_1 — reset process (type 105)
         105 => {
             if let Ok(rp) = asdu.decode_payload::<C_RP_NA_1>(AsduAddressing::IEC104) {
-                let ack = C_RP_NA_1 { ioa: rp.ioa, qrp: rp.qrp };
+                let ack = C_RP_NA_1 {
+                    ioa: rp.ioa,
+                    qrp: rp.qrp,
+                };
                 let bytes = encode_asdu_bytes(&ack, Cot::with(Cause::ACTIVATION_CON), ca);
                 let _ = send.send(bytes).await;
             }
@@ -764,8 +777,13 @@ async fn handle_command_list<P>(
     let vsq = Vsq::single(count as u8);
 
     // ACTIVATION_CON.
-    let ack_asdu =
-        Asdu::from_payload(Cot::with(Cause::ACTIVATION_CON), ca, vsq, &payload, AsduAddressing::IEC104);
+    let ack_asdu = Asdu::from_payload(
+        Cot::with(Cause::ACTIVATION_CON),
+        ca,
+        vsq,
+        &payload,
+        AsduAddressing::IEC104,
+    );
     let mut buf = BytesMut::new();
     ack_asdu.encode(&mut buf, AsduAddressing::IEC104);
     let _ = send.send(buf.to_vec()).await;
@@ -807,8 +825,12 @@ async fn run_104_peer(
     // Register sender.
     {
         let mut s = state.write().await;
-        s.peers
-            .insert(peer, PeerEntry { sender: sender.clone() });
+        s.peers.insert(
+            peer,
+            PeerEntry {
+                sender: sender.clone(),
+            },
+        );
     }
     let _ = event_tx.send(Event::Connected);
 
@@ -955,7 +977,11 @@ fn advance_value(
                 Some(PointValue::Float(f)) => *f,
                 _ => 0.0_f32,
             };
-            let delta = if rand::thread_rng().gen_bool(0.5) { *step } else { -*step };
+            let delta = if rand::thread_rng().gen_bool(0.5) {
+                *step
+            } else {
+                -*step
+            };
             let new_val = (current_f + delta).clamp(*min, *max);
             match current {
                 Some(PointValue::Normalized(_)) => Some(PointValue::Normalized(new_val)),
@@ -986,8 +1012,7 @@ fn advance_value(
             } else {
                 (elapsed_ticks % ticks_per_period) as f64 / ticks_per_period as f64
             };
-            let val = (f64::from(*amplitude)
-                * (2.0 * std::f64::consts::PI * phase).sin()
+            let val = (f64::from(*amplitude) * (2.0 * std::f64::consts::PI * phase).sin()
                 + f64::from(*offset)) as f32;
             match current {
                 Some(PointValue::Normalized(_)) => {
@@ -1075,13 +1100,14 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
                         Some(e) => iec60870_test_tools::points::entry_to_monitored(e),
                         None => return,
                     };
-                    let decision = match s.tracker.evaluate(iec60870_proto::asdu::Ioa(ioa), val, qds) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            tracing::error!(?e, ioa, "deadband evaluate error");
-                            iec60870::EmitDecision::Suppress
-                        }
-                    };
+                    let decision =
+                        match s.tracker.evaluate(iec60870_proto::asdu::Ioa(ioa), val, qds) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                tracing::error!(?e, ioa, "deadband evaluate error");
+                                iec60870::EmitDecision::Suppress
+                            }
+                        };
                     let kind_str = s
                         .image
                         .get(ioa)
@@ -1104,7 +1130,10 @@ async fn run_daemon(args: DaemonArgs, control_socket: PathBuf) -> anyhow::Result
 
                 // Always emit the SimTick event so observers see ticks even
                 // when the value channel is suppressed by deadband.
-                let _ = event_tx_tick.send(Event::SimTick { ioa, kind: kind_str });
+                let _ = event_tx_tick.send(Event::SimTick {
+                    ioa,
+                    kind: kind_str,
+                });
             }
         });
     }
@@ -1268,9 +1297,7 @@ fn parse_point_value(kind: &str, value: &str) -> anyhow::Result<PointValue> {
             Ok(PointValue::Normalized(f))
         }
         "me_nb" | "me_te" => {
-            let i: i16 = value
-                .parse()
-                .map_err(|_| anyhow::anyhow!("expected i16"))?;
+            let i: i16 = value.parse().map_err(|_| anyhow::anyhow!("expected i16"))?;
             Ok(PointValue::Scaled(i))
         }
         "me_nc" | "me_tf" => {
@@ -1317,7 +1344,13 @@ async fn main() -> anyhow::Result<()> {
             .await?;
         }
         CliCommand::List(args) => {
-            client_call(&socket, &Request::List { type_id: args.type_id }).await?;
+            client_call(
+                &socket,
+                &Request::List {
+                    type_id: args.type_id,
+                },
+            )
+            .await?;
         }
         CliCommand::Sim(sim_args) => match sim_args.command {
             SimSubcommand::Get(a) => {
@@ -1326,7 +1359,14 @@ async fn main() -> anyhow::Result<()> {
             SimSubcommand::Set(a) => {
                 let schedule: SimSchedule = serde_json::from_str(&a.schedule)
                     .map_err(|e| anyhow::anyhow!("invalid schedule JSON: {e}"))?;
-                client_call(&socket, &Request::SimSet { ioa: a.ioa, schedule }).await?;
+                client_call(
+                    &socket,
+                    &Request::SimSet {
+                        ioa: a.ioa,
+                        schedule,
+                    },
+                )
+                .await?;
             }
         },
         CliCommand::Deadband(args) => match args.command {

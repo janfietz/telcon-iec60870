@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime};
 use iec60870::file_transfer::{
     FileTransferEvent, FileTransferOutcome, FileTransferProvider, FsFileTransferProvider,
 };
-use iec60870::proto::asdu::CommonAddress;
 use iec60870::proto::asdu::types::file::NameOfFile;
+use iec60870::proto::asdu::CommonAddress;
 use iec60870::proto::frame104::Config;
 use iec60870::{Client104, Server104, Transport};
 
@@ -77,13 +77,10 @@ async fn fetch_round_trips_a_file() {
     let ft = client.file_transfer().expect("ft handle").clone();
     let mut events = ft.subscribe();
 
-    let bytes = tokio::time::timeout(
-        Duration::from_secs(5),
-        ft.fetch(CommonAddress(1), nof),
-    )
-    .await
-    .expect("transfer timeout")
-    .expect("transfer failed");
+    let bytes = tokio::time::timeout(Duration::from_secs(5), ft.fetch(CommonAddress(1), nof))
+        .await
+        .expect("transfer timeout")
+        .expect("transfer failed");
 
     assert_eq!(bytes as usize, payload.len());
 

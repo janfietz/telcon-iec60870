@@ -111,7 +111,10 @@ impl PointCache {
             .iter()
             .map(|(&(kind, ioa), pt)| (kind, ioa, pt.clone()))
             .collect();
-        entries.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.type_id().cmp(&b.0.type_id())));
+        entries.sort_by(|a, b| {
+            a.1.cmp(&b.1)
+                .then_with(|| a.0.type_id().cmp(&b.0.type_id()))
+        });
         entries
     }
 }

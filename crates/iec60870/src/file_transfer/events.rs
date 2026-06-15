@@ -1,7 +1,7 @@
 //! Observability events emitted by the file-transfer service.
 
-use iec60870_proto::asdu::CommonAddress;
 use iec60870_proto::asdu::types::file::NameOfFile;
+use iec60870_proto::asdu::CommonAddress;
 use iec60870_proto::file_transfer::{FailureReason, Role};
 
 /// One file-transfer lifecycle event.

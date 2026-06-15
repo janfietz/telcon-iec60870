@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use bytes::BytesMut;
 use iec60870_proto::asdu::cot::{Cause, Cot};
 use iec60870_proto::asdu::types::file::{
-    F_AF_NA_1, F_FR_NA_1, F_LS_NA_1, F_SC_NA_1, F_SG_NA_1, F_SR_NA_1, NameOfFile,
+    NameOfFile, F_AF_NA_1, F_FR_NA_1, F_LS_NA_1, F_SC_NA_1, F_SG_NA_1, F_SR_NA_1,
 };
 use iec60870_proto::asdu::{Asdu, AsduAddressing, AsduPayload, CommonAddress, Vsq};
 use iec60870_proto::file_transfer::{
@@ -95,11 +95,7 @@ impl FileTransferHandle {
     /// Proactively push a file to the peer using the configured provider's
     /// [`FileTransferProvider::open_read`] as the source. Returns total bytes
     /// sent.
-    pub async fn push(
-        &self,
-        ca: CommonAddress,
-        nof: NameOfFile,
-    ) -> Result<u32, FileTransferError> {
+    pub async fn push(&self, ca: CommonAddress, nof: NameOfFile) -> Result<u32, FileTransferError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.intent_tx
             .send(Intent::Push {
@@ -252,10 +248,9 @@ impl FileTransferService {
                     nof,
                     role: Role::Receiver,
                 });
-                let acts = active.session.step(
-                    SessionInput::Start { length: 0 },
-                    active.last_tick,
-                );
+                let acts = active
+                    .session
+                    .step(SessionInput::Start { length: 0 }, active.last_tick);
                 self.sessions.insert(key, active);
                 self.apply_actions(key, acts).await;
             }
@@ -422,10 +417,7 @@ impl FileTransferService {
             Some(i) => i,
             None => return,
         };
-        let active = self
-            .sessions
-            .get_mut(&key)
-            .expect("session inserted above");
+        let active = self.sessions.get_mut(&key).expect("session inserted above");
         active.last_tick = Instant::now();
         let acts = active.session.step(input, active.last_tick);
         self.apply_actions(key, acts).await;
@@ -473,10 +465,12 @@ impl FileTransferService {
                     self.deliver_segment(key, data).await;
                 }
                 SessionAction::Completed { bytes } => {
-                    self.finalize_session(key, FileTransferOutcome::Completed { bytes }).await;
+                    self.finalize_session(key, FileTransferOutcome::Completed { bytes })
+                        .await;
                 }
                 SessionAction::Failed(reason) => {
-                    self.finalize_session(key, FileTransferOutcome::Failed(reason)).await;
+                    self.finalize_session(key, FileTransferOutcome::Failed(reason))
+                        .await;
                 }
             }
         }
@@ -519,11 +513,7 @@ impl FileTransferService {
         active.session.step(SessionInput::SegmentReady(chunk), now)
     }
 
-    async fn deliver_segment(
-        &mut self,
-        key: (CommonAddress, NameOfFile),
-        data: Vec<u8>,
-    ) {
+    async fn deliver_segment(&mut self, key: (CommonAddress, NameOfFile), data: Vec<u8>) {
         let active = match self.sessions.get_mut(&key) {
             Some(s) => s,
             None => return,
@@ -585,9 +575,7 @@ fn failure_to_error(reason: FailureReason) -> FileTransferError {
             FileTransferError::Other("locally rejected transfer".into())
         }
         FailureReason::ChecksumMismatch => FileTransferError::ChecksumMismatch,
-        FailureReason::ProtocolViolation => {
-            FileTransferError::Other("protocol violation".into())
-        }
+        FailureReason::ProtocolViolation => FileTransferError::Other("protocol violation".into()),
         FailureReason::Aborted => FileTransferError::Other("aborted".into()),
     }
 }
@@ -615,4 +603,3 @@ fn decode_ft_asdu(asdu: &Asdu) -> Option<SessionInput> {
         _ => return None,
     })
 }
-

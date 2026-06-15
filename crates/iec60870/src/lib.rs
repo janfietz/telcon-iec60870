@@ -81,8 +81,8 @@ pub use security::{
 pub use tls::{
     client_config_with_client_cert, client_config_with_roots, server_config_requiring_client_cert,
     server_config_single_cert, tls_client_connect, tls_client_connect_with_policy,
-    tls_server_accept, tls_server_accept_with, tls_server_accept_with_policy, TlsClient,
-    TlsConfig, TlsServer, TlsServerConnection,
+    tls_server_accept, tls_server_accept_with, tls_server_accept_with_policy, TlsClient, TlsConfig,
+    TlsServer, TlsServerConnection,
 };
 
 pub use master101::{Master101, Master101Event};

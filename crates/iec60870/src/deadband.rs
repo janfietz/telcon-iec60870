@@ -119,7 +119,10 @@ impl DeadbandTracker {
     }
 
     pub fn policy(&self, ioa: Ioa) -> DeadbandPolicy {
-        self.policies.get(&ioa).copied().unwrap_or(DeadbandPolicy::None)
+        self.policies
+            .get(&ioa)
+            .copied()
+            .unwrap_or(DeadbandPolicy::None)
     }
 
     pub fn remove_policy(&mut self, ioa: Ioa) -> Option<DeadbandPolicy> {
@@ -211,11 +214,7 @@ impl DeadbandTracker {
 /// Compute whether `new` is far enough from `old` for the given policy.
 /// Caller has already established that the kinds match. Single/Double
 /// short-circuit any-change semantics here; the threshold is ignored.
-fn threshold_crossed(
-    old: MonitoredValue,
-    new: MonitoredValue,
-    policy: DeadbandPolicy,
-) -> bool {
+fn threshold_crossed(old: MonitoredValue, new: MonitoredValue, policy: DeadbandPolicy) -> bool {
     use MonitoredValue::*;
     // Single/Double: any transition.
     match (old, new) {
@@ -284,10 +283,7 @@ mod tests {
     fn set_policy_and_read_back() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        assert_eq!(
-            t.policy(Ioa(1)),
-            DeadbandPolicy::Absolute { delta: 0.5 }
-        );
+        assert_eq!(t.policy(Ioa(1)), DeadbandPolicy::Absolute { delta: 0.5 });
     }
 
     #[test]
@@ -302,12 +298,17 @@ mod tests {
     #[test]
     fn forget_drops_only_named_baseline() {
         let mut t = DeadbandTracker::new();
-        let _ = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
-        let _ = t.evaluate(Ioa(2), MonitoredValue::Float(2.0), qds()).unwrap();
+        let _ = t
+            .evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
+        let _ = t
+            .evaluate(Ioa(2), MonitoredValue::Float(2.0), qds())
+            .unwrap();
         t.forget(Ioa(1));
         // IOA 1's next evaluate is first-sample again.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -316,15 +317,15 @@ mod tests {
     fn clear_drops_all_baselines_but_keeps_policies() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        let _ = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        let _ = t
+            .evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         t.clear();
-        assert_eq!(
-            t.policy(Ioa(1)),
-            DeadbandPolicy::Absolute { delta: 0.5 }
-        );
+        assert_eq!(t.policy(Ioa(1)), DeadbandPolicy::Absolute { delta: 0.5 });
         // Baseline gone — first-sample again.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -334,11 +335,15 @@ mod tests {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
         // Seed baseline.
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         // Same value, flip `invalid`.
         let bad = Qds {
             overflow: false,
-            quality: Quality { invalid: true, ..Default::default() },
+            quality: Quality {
+                invalid: true,
+                ..Default::default()
+            },
         };
         let decision = t.evaluate(Ioa(1), MonitoredValue::Float(1.0), bad).unwrap();
         assert_eq!(decision, EmitDecision::Emit);
@@ -348,8 +353,12 @@ mod tests {
     fn overflow_bit_change_forces_emit() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
-        let ovf = Qds { overflow: true, quality: Quality::default() };
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
+        let ovf = Qds {
+            overflow: true,
+            quality: Quality::default(),
+        };
         assert_eq!(
             t.evaluate(Ioa(1), MonitoredValue::Float(1.0), ovf).unwrap(),
             EmitDecision::Emit
@@ -359,8 +368,11 @@ mod tests {
     #[test]
     fn kind_mismatch_returns_error_and_keeps_baseline() {
         let mut t = DeadbandTracker::new();
-        t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds()).unwrap();
-        let err = t.evaluate(Ioa(1), MonitoredValue::Float(10.0), qds()).unwrap_err();
+        t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds())
+            .unwrap();
+        let err = t
+            .evaluate(Ioa(1), MonitoredValue::Float(10.0), qds())
+            .unwrap_err();
         assert_eq!(
             err,
             DeadbandError::KindMismatch {
@@ -371,7 +383,8 @@ mod tests {
         );
         // Baseline still Scaled.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Scaled(10), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -379,9 +392,11 @@ mod tests {
     #[test]
     fn policy_none_always_emits_on_change() {
         let mut t = DeadbandTracker::new();
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0001), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0001), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -389,10 +404,12 @@ mod tests {
     #[test]
     fn policy_none_same_value_suppresses() {
         let mut t = DeadbandTracker::new();
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         // Exactly equal value + equal quality → no change at all → Suppress.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -403,9 +420,11 @@ mod tests {
     fn absolute_below_threshold_suppresses() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -414,14 +433,17 @@ mod tests {
     fn absolute_at_threshold_emits_and_updates_baseline() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(100.5), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.5), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
         // Baseline now 100.5; 100.9 (delta 0.4) suppresses.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(100.9), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.9), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -431,26 +453,37 @@ mod tests {
     #[test]
     fn percent_evaluates_against_last_emitted() {
         let mut t = DeadbandTracker::new();
-        t.set_policy(Ioa(1), DeadbandPolicy::Percent { pct: 5.0, floor: 0.001 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        t.set_policy(
+            Ioa(1),
+            DeadbandPolicy::Percent {
+                pct: 5.0,
+                floor: 0.001,
+            },
+        );
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds())
+            .unwrap();
         // 4.9% drift → suppress.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(104.9), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(104.9), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
         // 5.0% drift → emit.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(105.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(105.0), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
         // New baseline 105.0; 110.0 is 4.76% → suppress.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(110.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(110.0), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
         // 110.26 is 5.01% from 105.0 → emit.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(110.26), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(110.26), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -458,15 +491,24 @@ mod tests {
     #[test]
     fn percent_floor_kicks_in_near_zero() {
         let mut t = DeadbandTracker::new();
-        t.set_policy(Ioa(1), DeadbandPolicy::Percent { pct: 5.0, floor: 1.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(0.0), qds()).unwrap();
+        t.set_policy(
+            Ioa(1),
+            DeadbandPolicy::Percent {
+                pct: 5.0,
+                floor: 1.0,
+            },
+        );
+        t.evaluate(Ioa(1), MonitoredValue::Float(0.0), qds())
+            .unwrap();
         // Threshold = 0.05 * max(0, 1) = 0.05.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(0.04), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(0.04), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(0.05), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(0.05), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -477,9 +519,11 @@ mod tests {
     fn single_transition_always_emits_regardless_of_threshold() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Single(false), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Single(false), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Single(true), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Single(true), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -488,9 +532,11 @@ mod tests {
     fn double_no_transition_suppresses_with_threshold() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Double(DoublePoint::On), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -501,10 +547,12 @@ mod tests {
     fn scaled_integer_distance_no_overflow() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 65_535.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MIN), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MIN), qds())
+            .unwrap();
         // Distance = 65535 → emits at the threshold.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MAX), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Scaled(i16::MAX), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -513,13 +561,16 @@ mod tests {
     fn normalized_absolute_threshold() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.1 });
-        t.evaluate(Ioa(1), MonitoredValue::Normalized(0.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Normalized(0.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.09), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.09), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.1), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Normalized(0.1), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -530,9 +581,11 @@ mod tests {
     fn nan_to_finite_transition_emits() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -541,9 +594,11 @@ mod tests {
     fn finite_to_nan_transition_emits() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(f32::NAN), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -552,9 +607,11 @@ mod tests {
     fn infinity_transition_emits() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 999.0 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(f32::INFINITY), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(f32::INFINITY), qds())
+                .unwrap(),
             EmitDecision::Emit
         );
     }
@@ -565,11 +622,13 @@ mod tests {
     fn observe_seeds_baseline_so_later_evaluate_suppresses() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        t.observe(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        t.observe(Ioa(1), MonitoredValue::Float(100.0), qds())
+            .unwrap();
         // Without observe, evaluate(100.4) would emit as first-sample.
         // With observe, the baseline is already 100.0; 100.4 is below 0.5.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(100.4), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -578,12 +637,15 @@ mod tests {
     fn observe_refreshes_baseline_for_subsequent_evaluate() {
         let mut t = DeadbandTracker::new();
         t.set_policy(Ioa(1), DeadbandPolicy::Absolute { delta: 0.5 });
-        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds()).unwrap();
+        t.evaluate(Ioa(1), MonitoredValue::Float(100.0), qds())
+            .unwrap();
         // GI happens — bumps baseline to 105.0.
-        t.observe(Ioa(1), MonitoredValue::Float(105.0), qds()).unwrap();
+        t.observe(Ioa(1), MonitoredValue::Float(105.0), qds())
+            .unwrap();
         // Without the observe, 105.4 would cross delta=0.5 from 100.0.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(105.4), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(105.4), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }
@@ -591,8 +653,11 @@ mod tests {
     #[test]
     fn observe_kind_mismatch_returns_error_and_keeps_baseline() {
         let mut t = DeadbandTracker::new();
-        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap();
-        let err = t.observe(Ioa(1), MonitoredValue::Scaled(1), qds()).unwrap_err();
+        t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+            .unwrap();
+        let err = t
+            .observe(Ioa(1), MonitoredValue::Scaled(1), qds())
+            .unwrap_err();
         assert_eq!(
             err,
             DeadbandError::KindMismatch {
@@ -605,7 +670,8 @@ mod tests {
         // same Float value + same quality should Suppress, proving the
         // baseline was not corrupted by the failed observe.
         assert_eq!(
-            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds()).unwrap(),
+            t.evaluate(Ioa(1), MonitoredValue::Float(1.0), qds())
+                .unwrap(),
             EmitDecision::Suppress
         );
     }

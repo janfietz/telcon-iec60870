@@ -17,15 +17,13 @@ use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1};
 use iec60870::proto::asdu::{CommonAddress, Cot, Ioa, Vsq};
 use iec60870::proto::frame104::Config;
 use iec60870::{
-    client_config_with_client_cert, client_config_with_roots,
-    server_config_requiring_client_cert, tls_client_connect, ClientCertPolicy, ClientEvent,
-    IpFilter, NoopHandler, TlsSecurityConfig, Transport, TlsServer, VerifyError,
+    client_config_with_client_cert, client_config_with_roots, server_config_requiring_client_cert,
+    tls_client_connect, ClientCertPolicy, ClientEvent, IpFilter, NoopHandler, TlsSecurityConfig,
+    TlsServer, Transport, VerifyError,
 };
 use rcgen::{CertificateParams, DistinguishedName, DnValue, KeyPair, SanType};
 use sha2::{Digest, Sha256};
-use tokio_rustls::rustls::pki_types::{
-    CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer,
-};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::RootCertStore;
 
 struct Pki {
@@ -62,7 +60,9 @@ fn build_pki() -> Pki {
     );
     server_params.distinguished_name = server_dn;
     let server_key = KeyPair::generate().unwrap();
-    let server_cert = server_params.signed_by(&server_key, &ca_cert, &ca_key).unwrap();
+    let server_cert = server_params
+        .signed_by(&server_key, &ca_cert, &ca_key)
+        .unwrap();
 
     // 3. Issue client leaf.
     let mut client_params = CertificateParams::default();
@@ -73,7 +73,9 @@ fn build_pki() -> Pki {
     );
     client_params.distinguished_name = client_dn;
     let client_key = KeyPair::generate().unwrap();
-    let client_cert = client_params.signed_by(&client_key, &ca_cert, &ca_key).unwrap();
+    let client_cert = client_params
+        .signed_by(&client_key, &ca_cert, &ca_key)
+        .unwrap();
 
     fn key_to_pkcs8(key: KeyPair) -> PrivateKeyDer<'static> {
         let der = key.serialize_der();
@@ -165,8 +167,8 @@ async fn expect_rejection(
     client_chain: Vec<CertificateDer<'static>>,
     client_key: PrivateKeyDer<'static>,
 ) -> bool {
-    let client_cfg =
-        client_config_with_client_cert(roots_from(ca), client_chain, client_key).expect("client cfg");
+    let client_cfg = client_config_with_client_cert(roots_from(ca), client_chain, client_key)
+        .expect("client cfg");
     let transport = Transport::Tls {
         addr,
         server_name: "server.test".into(),
@@ -205,23 +207,16 @@ async fn pinned_fingerprint_accepts_matching_client() {
     let security = security_for(&pki, ClientCertPolicy::PinnedFingerprints(vec![pin]));
 
     let bind = (Ipv4Addr::LOCALHOST, 0).into();
-    let server = TlsServer::bind_with_security(
-        bind,
-        Config::default(),
-        security,
-        IpFilter::allow_all(),
-    )
-    .await
-    .expect("bind");
+    let server =
+        TlsServer::bind_with_security(bind, Config::default(), security, IpFilter::allow_all())
+            .await
+            .expect("bind");
     let addr = server.local_addr().expect("local_addr");
     let server_task = spawn_accept(server);
 
-    let client_cfg = client_config_with_client_cert(
-        roots_from(&pki.ca_cert),
-        pki.client_chain,
-        pki.client_key,
-    )
-    .expect("client cfg");
+    let client_cfg =
+        client_config_with_client_cert(roots_from(&pki.ca_cert), pki.client_chain, pki.client_key)
+            .expect("client cfg");
     let transport = Transport::Tls {
         addr,
         server_name: "server.test".into(),
@@ -256,14 +251,10 @@ async fn pinned_fingerprint_rejects_wrong_pin() {
 
     let security = security_for(&pki, ClientCertPolicy::PinnedFingerprints(vec![[0u8; 32]]));
     let bind = (Ipv4Addr::LOCALHOST, 0).into();
-    let server = TlsServer::bind_with_security(
-        bind,
-        Config::default(),
-        security,
-        IpFilter::allow_all(),
-    )
-    .await
-    .expect("bind");
+    let server =
+        TlsServer::bind_with_security(bind, Config::default(), security, IpFilter::allow_all())
+            .await
+            .expect("bind");
     let addr = server.local_addr().expect("local_addr");
     let server_task = spawn_accept(server);
 
@@ -283,14 +274,10 @@ async fn custom_verifier_can_reject() {
     let security = security_for(&pki, policy);
 
     let bind = (Ipv4Addr::LOCALHOST, 0).into();
-    let server = TlsServer::bind_with_security(
-        bind,
-        Config::default(),
-        security,
-        IpFilter::allow_all(),
-    )
-    .await
-    .expect("bind");
+    let server =
+        TlsServer::bind_with_security(bind, Config::default(), security, IpFilter::allow_all())
+            .await
+            .expect("bind");
     let addr = server.local_addr().expect("local_addr");
     let server_task = spawn_accept(server);
 
@@ -306,14 +293,10 @@ async fn custom_root_store_rejects_other_ca() {
 
     let security = security_for(&pki, ClientCertPolicy::TrustChain);
     let bind = (Ipv4Addr::LOCALHOST, 0).into();
-    let server = TlsServer::bind_with_security(
-        bind,
-        Config::default(),
-        security,
-        IpFilter::allow_all(),
-    )
-    .await
-    .expect("bind");
+    let server =
+        TlsServer::bind_with_security(bind, Config::default(), security, IpFilter::allow_all())
+            .await
+            .expect("bind");
     let addr = server.local_addr().expect("local_addr");
     let server_task = spawn_accept(server);
 
@@ -339,14 +322,10 @@ async fn cipher_allowlist_takes_effect() {
     security.cipher_suites = Some(vec![ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256]);
 
     let bind = (Ipv4Addr::LOCALHOST, 0).into();
-    let server = TlsServer::bind_with_security(
-        bind,
-        Config::default(),
-        security,
-        IpFilter::allow_all(),
-    )
-    .await
-    .expect("bind");
+    let server =
+        TlsServer::bind_with_security(bind, Config::default(), security, IpFilter::allow_all())
+            .await
+            .expect("bind");
     let addr = server.local_addr().expect("local_addr");
     let server_task = spawn_accept(server);
 
@@ -413,12 +392,9 @@ async fn mtls_handshake_and_interrogation_roundtrip() {
         }
     });
 
-    let client_cfg = client_config_with_client_cert(
-        roots_from(&pki.ca_cert),
-        pki.client_chain,
-        pki.client_key,
-    )
-    .expect("client cfg");
+    let client_cfg =
+        client_config_with_client_cert(roots_from(&pki.ca_cert), pki.client_chain, pki.client_key)
+            .expect("client cfg");
 
     let transport = Transport::Tls {
         addr,
@@ -435,12 +411,7 @@ async fn mtls_handshake_and_interrogation_roundtrip() {
         objects: vec![(Ioa(0), Qoi::GENERAL)],
     };
     client
-        .send(
-            Cot::act(),
-            CommonAddress(1),
-            Vsq::single(1),
-            &interrogation,
-        )
+        .send(Cot::act(), CommonAddress(1), Vsq::single(1), &interrogation)
         .await
         .expect("send interrogation");
 
@@ -515,11 +486,10 @@ async fn mtls_rejects_client_without_certificate() {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
             let mut closed_or_dropped = false;
             loop {
-                let evt =
-                    match tokio::time::timeout_at(deadline, client.recv()).await {
-                        Ok(e) => e,
-                        Err(_) => break,
-                    };
+                let evt = match tokio::time::timeout_at(deadline, client.recv()).await {
+                    Ok(e) => e,
+                    Err(_) => break,
+                };
                 match evt {
                     None => {
                         closed_or_dropped = true;

@@ -4,12 +4,12 @@
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
+use tokio_rustls::rustls::client::danger::HandshakeSignatureValid;
 use tokio_rustls::rustls::pki_types::{CertificateDer, UnixTime};
 use tokio_rustls::rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use tokio_rustls::rustls::{
     CertificateError, DigitallySignedStruct, DistinguishedName, Error, SignatureScheme,
 };
-use tokio_rustls::rustls::client::danger::HandshakeSignatureValid;
 
 use super::tls_config::{CertificateChain, ClientCertPolicy};
 

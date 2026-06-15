@@ -17,7 +17,7 @@
 //! CRC-16/IBM is 16-bit so collisions are possible (one in 65 536 pairs in
 //! the worst case). By default the constructor returns
 //! [`FileTransferError::Collision`] when two files hash to the same NOF.
-//! Use [`FsFileTransferProvider::collision_strategy`] to pick `KeepFirst`
+//! Use [`FsFileTransferProvider::with_collision_strategy`] to pick `KeepFirst`
 //! or `KeepLast` instead.
 
 use std::collections::HashMap;

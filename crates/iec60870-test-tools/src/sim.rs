@@ -2,7 +2,7 @@
 //!
 //! Each scheduled IOA runs on its own tokio interval. On every tick the
 //! simulator advances the stored point's value according to its
-//! [`SimSchedule`][crate::wire::SimSchedule], then notifies the daemon to
+//! [`SimSchedule`], then notifies the daemon to
 //! emit a spontaneous ASDU carrying the new value and pushes a `SimTick`
 //! event on the broadcast channel.
 

@@ -102,9 +102,9 @@ impl TransportArgs {
                 Ok(TransportChoice::Tcp { addr, coa })
             }
             TransportKind::Serial => {
-                let path = self.serial.ok_or_else(|| {
-                    anyhow!("--serial <PATH> is required for --transport serial")
-                })?;
+                let path = self
+                    .serial
+                    .ok_or_else(|| anyhow!("--serial <PATH> is required for --transport serial"))?;
                 if self.addr.is_some() {
                     return Err(anyhow!(
                         "--addr is incompatible with --transport serial; drop it or switch transports"

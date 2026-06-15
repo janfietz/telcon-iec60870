@@ -79,8 +79,7 @@ pub fn spawn_simulator(
             if phase_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(phase_ms)).await;
             }
-            let mut interval =
-                tokio::time::interval(Duration::from_millis(interval_ms));
+            let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
             let mut elapsed_ticks: u64 = 0;
@@ -97,7 +96,9 @@ pub fn spawn_simulator(
                         Some(e) => e.schedule.clone(),
                         None => return,
                     };
-                    if let Some(new_value) = advance(&schedule, img.get(ioa).map(|e| &e.value), elapsed_ticks) {
+                    if let Some(new_value) =
+                        advance(&schedule, img.get(ioa).map(|e| &e.value), elapsed_ticks)
+                    {
                         img.set(ioa, new_value, None);
                     }
                 }
@@ -182,7 +183,11 @@ fn advance(
             };
             let delta = {
                 let mut rng = rand::thread_rng();
-                if rng.gen_bool(0.5) { *step } else { -*step }
+                if rng.gen_bool(0.5) {
+                    *step
+                } else {
+                    -*step
+                }
             };
             let new_val = (current_f + delta).clamp(*min, *max);
             // Detect whether this is a Normalized or Float point.
@@ -199,7 +204,9 @@ fn advance(
             };
             let new_val = (current_i + step).rem_euclid(*wrap_at);
             #[allow(clippy::cast_possible_truncation)]
-            Some(PointValue::Scaled(new_val.clamp(i16::MIN as i32, i16::MAX as i32) as i16))
+            Some(PointValue::Scaled(
+                new_val.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            ))
         }
 
         SimSchedule::Sine {

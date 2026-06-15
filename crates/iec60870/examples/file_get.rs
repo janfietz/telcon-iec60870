@@ -31,7 +31,10 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "127.0.0.1:2404".into())
         .parse()?;
     let nof_arg = std::env::args().nth(2).unwrap_or_else(|| "0xBB3D".into());
-    let nof_value = if let Some(hex) = nof_arg.strip_prefix("0x").or_else(|| nof_arg.strip_prefix("0X")) {
+    let nof_value = if let Some(hex) = nof_arg
+        .strip_prefix("0x")
+        .or_else(|| nof_arg.strip_prefix("0X"))
+    {
         u16::from_str_radix(hex, 16)?
     } else {
         nof_arg.parse()?

@@ -168,7 +168,12 @@ async fn loopback_104_round_trip() -> Result<()> {
         .get("points")
         .and_then(|v| v.as_array())
         .expect("points array");
-    assert_eq!(points.len(), 50, "expected 50 default points, got {}", points.len());
+    assert_eq!(
+        points.len(),
+        50,
+        "expected 50 default points, got {}",
+        points.len()
+    );
 
     // 2. Server `set` mutates a float point.
     let resp = h
@@ -185,7 +190,10 @@ async fn loopback_104_round_trip() -> Result<()> {
     let resp = h.server(Request::Get { ioa: 500 }).await?;
     assert!(resp.ok, "get failed: {:?}", resp.error);
     let v = resp.data.get("value").expect("value");
-    assert_eq!(v.get("kind"), Some(&serde_json::Value::String("float".into())));
+    assert_eq!(
+        v.get("kind"),
+        Some(&serde_json::Value::String("float".into()))
+    );
 
     // 4. Status sanity-check on both sides.
     let resp = h.server(Request::Status).await?;
@@ -209,7 +217,10 @@ async fn loopback_104_round_trip() -> Result<()> {
         .await?;
     assert!(resp.ok, "interrogate failed: {:?}", resp.error);
     let count = resp.data.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-    assert_eq!(count, 50, "expected 50 points from interrogation, got {count}");
+    assert_eq!(
+        count, 50,
+        "expected 50 points from interrogation, got {count}"
+    );
 
     // 6. Client `cmd single`: ACTIVATION_CON positive.
     let resp = h
@@ -263,7 +274,10 @@ async fn loopback_104_round_trip() -> Result<()> {
         .await?;
     assert!(resp.ok, "file get failed: {:?}", resp.error);
     let bytes = resp.data.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
-    assert_eq!(bytes, 20, "expected 20 bytes (the test fixture), got {bytes}");
+    assert_eq!(
+        bytes, 20,
+        "expected 20 bytes (the test fixture), got {bytes}"
+    );
 
     h.shutdown().await
 }

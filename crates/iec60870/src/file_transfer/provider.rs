@@ -18,8 +18,8 @@
 use std::time::SystemTime;
 
 use async_trait::async_trait;
-use iec60870_proto::asdu::types::file::{LengthOfFile, NameOfFile, Sof};
 use iec60870_proto::asdu::ie::Cp56Time2a;
+use iec60870_proto::asdu::types::file::{LengthOfFile, NameOfFile, Sof};
 use thiserror::Error;
 
 /// Tunables that affect every transfer driven by a provider-backed service.
@@ -88,10 +88,7 @@ pub trait FileTransferProvider: Send + Sync + 'static {
     async fn list_directory(&self) -> Result<Vec<DirectoryEntry>, FileTransferError>;
 
     /// Look up metadata for one file. Returns `None` for unknown NOFs.
-    async fn lookup(
-        &self,
-        nof: NameOfFile,
-    ) -> Result<Option<FileMetadata>, FileTransferError>;
+    async fn lookup(&self, nof: NameOfFile) -> Result<Option<FileMetadata>, FileTransferError>;
 
     /// Open a file for reading. The returned reader is driven segment-by-
     /// segment until it yields `Ok(None)` (EOF).

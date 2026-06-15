@@ -157,8 +157,7 @@ impl Client104 {
         let (ft_tx, ft_handle, ft_task) = match ft {
             Some((provider, cfg)) => {
                 let (asdu_tx, asdu_rx) = mpsc::channel(32);
-                let (handle, service) =
-                    ft_service::build(provider, cfg, cmd_tx.clone(), asdu_rx);
+                let (handle, service) = ft_service::build(provider, cfg, cmd_tx.clone(), asdu_rx);
                 let task = tokio::spawn(service.run());
                 (Some(asdu_tx), Some(handle), Some(task))
             }

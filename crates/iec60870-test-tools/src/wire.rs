@@ -82,11 +82,7 @@ impl PointKind {
     pub const fn has_timestamp(self) -> bool {
         matches!(
             self,
-            PointKind::SpTb
-                | PointKind::DpTb
-                | PointKind::MeTd
-                | PointKind::MeTe
-                | PointKind::MeTf
+            PointKind::SpTb | PointKind::DpTb | PointKind::MeTd | PointKind::MeTe | PointKind::MeTf
         )
     }
 }
@@ -202,9 +198,7 @@ impl DeadbandPolicyWire {
     pub fn into_policy(self) -> iec60870::DeadbandPolicy {
         match self {
             DeadbandPolicyWire::None => iec60870::DeadbandPolicy::None,
-            DeadbandPolicyWire::Absolute { delta } => {
-                iec60870::DeadbandPolicy::Absolute { delta }
-            }
+            DeadbandPolicyWire::Absolute { delta } => iec60870::DeadbandPolicy::Absolute { delta },
             DeadbandPolicyWire::Percent { pct, floor } => {
                 iec60870::DeadbandPolicy::Percent { pct, floor }
             }
@@ -215,9 +209,7 @@ impl DeadbandPolicyWire {
     pub fn from_policy(p: iec60870::DeadbandPolicy) -> Self {
         match p {
             iec60870::DeadbandPolicy::None => DeadbandPolicyWire::None,
-            iec60870::DeadbandPolicy::Absolute { delta } => {
-                DeadbandPolicyWire::Absolute { delta }
-            }
+            iec60870::DeadbandPolicy::Absolute { delta } => DeadbandPolicyWire::Absolute { delta },
             iec60870::DeadbandPolicy::Percent { pct, floor } => {
                 DeadbandPolicyWire::Percent { pct, floor }
             }

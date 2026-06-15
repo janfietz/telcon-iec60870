@@ -716,15 +716,11 @@ mod tests {
         // (which is ~1 year in the past relative to `stub`), then
         // `now.saturating_duration_since(sent_at)` would be a positive value
         // ~1 year and t1 would have fired immediately.
-        let actions = c.handle(
-            Input::Tick,
-            stub + Duration::from_secs(29),
-        );
+        let actions = c.handle(Input::Tick, stub + Duration::from_secs(29));
         assert!(
-            !actions.iter().any(|a| matches!(
-                a,
-                Action::Disconnect(DisconnectReason::AckTimeout)
-            )),
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Disconnect(DisconnectReason::AckTimeout))),
             "t1 fired before its deadline — flush_pending consulted the system clock"
         );
     }

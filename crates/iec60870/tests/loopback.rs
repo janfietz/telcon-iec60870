@@ -14,9 +14,7 @@ use iec60870::proto::asdu::ie::{Quality, Siq};
 use iec60870::proto::asdu::types::{Qoi, C_IC_NA_1, M_SP_NA_1};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame104::Config;
-use iec60870::{
-    AsduPolicy, Client104, DefaultLoggingHandler, Server104, ServerEvent, Transport,
-};
+use iec60870::{AsduPolicy, Client104, DefaultLoggingHandler, Server104, ServerEvent, Transport};
 
 fn encode_asdu<P: AsduPayload>(payload: &P, cot: Cot, vsq: Vsq) -> Vec<u8> {
     let asdu = Asdu::from_payload(cot, CommonAddress(1), vsq, payload, AsduAddressing::IEC104);

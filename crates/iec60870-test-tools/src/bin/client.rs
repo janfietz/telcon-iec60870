@@ -37,19 +37,21 @@ use clap::{Args, Parser, Subcommand};
 use iec60870::file_transfer::FsFileTransferProvider;
 use iec60870::proto::asdu::cot::{Cause, Cot};
 use iec60870::proto::asdu::header::{AsduAddressing, CommonAddress, Ioa, Vsq};
-use iec60870::proto::asdu::ie::{DoublePoint, Nva, Qds, Diq, R32, Siq, Sva};
-use iec60870::proto::asdu::types::{
-    Qoi, C_DC_NA_1, C_IC_NA_1, C_RC_NA_1, C_SC_NA_1, C_SE_NA_1, C_SE_NB_1, C_SE_NC_1,
-    M_DP_NA_1, M_DP_TB_1, M_ME_NA_1, M_ME_NB_1, M_ME_NC_1, M_ME_TD_1, M_ME_TE_1, M_ME_TF_1,
-    M_SP_NA_1, M_SP_TB_1,
-};
-use iec60870::proto::asdu::types::{Dco, Qos, Rco, Sco, StepDirection};
+use iec60870::proto::asdu::ie::{Diq, DoublePoint, Nva, Qds, Siq, Sva, R32};
 use iec60870::proto::asdu::types::file::NameOfFile;
+use iec60870::proto::asdu::types::{Dco, Qos, Rco, Sco, StepDirection};
+use iec60870::proto::asdu::types::{
+    Qoi, C_DC_NA_1, C_IC_NA_1, C_RC_NA_1, C_SC_NA_1, C_SE_NA_1, C_SE_NB_1, C_SE_NC_1, M_DP_NA_1,
+    M_DP_TB_1, M_ME_NA_1, M_ME_NB_1, M_ME_NC_1, M_ME_TD_1, M_ME_TE_1, M_ME_TF_1, M_SP_NA_1,
+    M_SP_TB_1,
+};
 use iec60870::proto::asdu::{Asdu, AsduPayload};
 use iec60870::proto::frame101::frame::LinkAddress;
 use iec60870::proto::frame101::link::{Config as LinkConfig, LinkState};
 use iec60870::proto::frame104::Config as Config104;
-use iec60870::{Client104, ClientEvent, DefaultLoggingHandler, Master101, Master101Event, Transport};
+use iec60870::{
+    Client104, ClientEvent, DefaultLoggingHandler, Master101, Master101Event, Transport,
+};
 use iec60870_test_tools::cache::PointCache;
 use iec60870_test_tools::control::{self, ControlHandler};
 use iec60870_test_tools::transport::{TransportArgs, TransportChoice};
@@ -424,7 +426,9 @@ fn process_asdu(asdu: &Asdu, state: &mut DaemonState) -> Vec<Event> {
                 for (ioa, siq) in p.objects {
                     let v = PointValue::Single(siq.on);
                     let q = siq_to_wire(siq);
-                    state.cache.update(PointKind::SpNa, ioa.0, v.clone(), q, None);
+                    state
+                        .cache
+                        .update(PointKind::SpNa, ioa.0, v.clone(), q, None);
                     push_event!(ioa.0, v);
                     feed_interrogation(state, ca, &v, q, PointKind::SpNa, ioa.0);
                 }
@@ -435,7 +439,9 @@ fn process_asdu(asdu: &Asdu, state: &mut DaemonState) -> Vec<Event> {
                 for (ioa, diq) in p.objects {
                     let v = PointValue::Double(dp_to_wire(diq.state));
                     let q = diq_to_wire(diq);
-                    state.cache.update(PointKind::DpNa, ioa.0, v.clone(), q, None);
+                    state
+                        .cache
+                        .update(PointKind::DpNa, ioa.0, v.clone(), q, None);
                     push_event!(ioa.0, v);
                     feed_interrogation(state, ca, &v, q, PointKind::DpNa, ioa.0);
                 }
@@ -446,7 +452,9 @@ fn process_asdu(asdu: &Asdu, state: &mut DaemonState) -> Vec<Event> {
                 for (ioa, (nva, qds)) in p.objects {
                     let v = PointValue::Normalized(nva.as_f32());
                     let q = qds_to_wire(qds);
-                    state.cache.update(PointKind::MeNa, ioa.0, v.clone(), q, None);
+                    state
+                        .cache
+                        .update(PointKind::MeNa, ioa.0, v.clone(), q, None);
                     push_event!(ioa.0, v);
                     feed_interrogation(state, ca, &v, q, PointKind::MeNa, ioa.0);
                 }
@@ -457,7 +465,9 @@ fn process_asdu(asdu: &Asdu, state: &mut DaemonState) -> Vec<Event> {
                 for (ioa, (sva, qds)) in p.objects {
                     let v = PointValue::Scaled(sva.0);
                     let q = qds_to_wire(qds);
-                    state.cache.update(PointKind::MeNb, ioa.0, v.clone(), q, None);
+                    state
+                        .cache
+                        .update(PointKind::MeNb, ioa.0, v.clone(), q, None);
                     push_event!(ioa.0, v);
                     feed_interrogation(state, ca, &v, q, PointKind::MeNb, ioa.0);
                 }
@@ -468,7 +478,9 @@ fn process_asdu(asdu: &Asdu, state: &mut DaemonState) -> Vec<Event> {
                 for (ioa, (r32, qds)) in p.objects {
                     let v = PointValue::Float(r32.0);
                     let q = qds_to_wire(qds);
-                    state.cache.update(PointKind::MeNc, ioa.0, v.clone(), q, None);
+                    state
+                        .cache
+                        .update(PointKind::MeNc, ioa.0, v.clone(), q, None);
                     push_event!(ioa.0, v);
                     feed_interrogation(state, ca, &v, q, PointKind::MeNc, ioa.0);
                 }
@@ -616,9 +628,12 @@ impl ControlHandler for ClientHandler {
             Request::CmdRegulating { ioa, step, ca } => {
                 self.handle_cmd_regulating(ioa, step, ca).await
             }
-            Request::CmdSetpoint { ioa, kind, value, ca } => {
-                self.handle_cmd_setpoint(ioa, kind, value, ca).await
-            }
+            Request::CmdSetpoint {
+                ioa,
+                kind,
+                value,
+                ca,
+            } => self.handle_cmd_setpoint(ioa, kind, value, ca).await,
             Request::Read { ioa, type_id } => self.handle_read(ioa, type_id).await,
             Request::FileGet { nof, out, ca } => self.handle_file_get(nof, out, ca).await,
             Request::FilePut { nof, input, ca } => self.handle_file_put(nof, input, ca).await,
@@ -724,9 +739,7 @@ impl ClientHandler {
         // Drain any remaining buffered points.
         let mut collected: Vec<(PointKind, u32, PointValue, QualityWire)> = Vec::new();
         let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(50);
-        while let Ok(Some(item)) =
-            tokio::time::timeout_at(drain_deadline, pt_rx.recv()).await
-        {
+        while let Ok(Some(item)) = tokio::time::timeout_at(drain_deadline, pt_rx.recv()).await {
             collected.push(item);
         }
 
@@ -781,7 +794,11 @@ impl ClientHandler {
 
     async fn handle_cmd_double(&self, ioa: u32, on: bool, ca: Option<u16>) -> Response {
         let ca_val = self.resolve_ca(ca).await;
-        let state = if on { DoublePoint::On } else { DoublePoint::Off };
+        let state = if on {
+            DoublePoint::On
+        } else {
+            DoublePoint::Off
+        };
         let payload = C_DC_NA_1 {
             objects: vec![(
                 Ioa(ioa),
@@ -924,12 +941,10 @@ impl ClientHandler {
                         t.milliseconds % 1000,
                     )
                 });
-                let value_json =
-                    serde_json::to_value(&pt.value).unwrap_or(serde_json::Value::Null);
+                let value_json = serde_json::to_value(&pt.value).unwrap_or(serde_json::Value::Null);
                 let quality_json =
                     serde_json::to_value(pt.quality).unwrap_or(serde_json::Value::Null);
-                let kind_json =
-                    serde_json::to_value(kind).unwrap_or(serde_json::Value::Null);
+                let kind_json = serde_json::to_value(kind).unwrap_or(serde_json::Value::Null);
                 let mut data = json!({
                     "ioa": ioa,
                     "kind": kind_json,
@@ -1057,9 +1072,7 @@ async fn run_daemon(args: DaemonArgs) -> Result<()> {
 
     tokio::fs::create_dir_all(&args.files_dir)
         .await
-        .with_context(|| {
-            format!("creating files directory {}", args.files_dir.display())
-        })?;
+        .with_context(|| format!("creating files directory {}", args.files_dir.display()))?;
 
     let (state, mut shutdown_rx) = DaemonState::new(coa);
     let state = Arc::new(Mutex::new(state));
@@ -1321,10 +1334,7 @@ async fn send_request(socket: &Path, req: &Request) -> Result<()> {
 }
 
 fn parse_nof(s: &str) -> Result<u16> {
-    if let Some(hex) = s
-        .strip_prefix("0x")
-        .or_else(|| s.strip_prefix("0X"))
-    {
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u16::from_str_radix(hex, 16).context("invalid hex NOF")
     } else {
         s.parse::<u16>().context("invalid NOF")
@@ -1416,9 +1426,11 @@ async fn main() -> Result<()> {
             }
         },
 
-        Commands::Read { ioa, type_id, socket } => {
-            send_request(&socket, &Request::Read { ioa, type_id }).await
-        }
+        Commands::Read {
+            ioa,
+            type_id,
+            socket,
+        } => send_request(&socket, &Request::Read { ioa, type_id }).await,
 
         Commands::File(fcmd) => match fcmd {
             FileCommands::Get {
@@ -1429,8 +1441,15 @@ async fn main() -> Result<()> {
             } => {
                 let nof_val = parse_nof(&nof)?;
                 let out_path = out.unwrap_or_default();
-                send_request(&socket, &Request::FileGet { nof: nof_val, out: out_path, ca })
-                    .await
+                send_request(
+                    &socket,
+                    &Request::FileGet {
+                        nof: nof_val,
+                        out: out_path,
+                        ca,
+                    },
+                )
+                .await
             }
             FileCommands::Put {
                 nof,
@@ -1439,7 +1458,15 @@ async fn main() -> Result<()> {
                 socket,
             } => {
                 let nof_val = parse_nof(&nof)?;
-                send_request(&socket, &Request::FilePut { nof: nof_val, input, ca }).await
+                send_request(
+                    &socket,
+                    &Request::FilePut {
+                        nof: nof_val,
+                        input,
+                        ca,
+                    },
+                )
+                .await
             }
         },
 

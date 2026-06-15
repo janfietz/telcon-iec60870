@@ -46,7 +46,11 @@ async fn main() -> anyhow::Result<()> {
     let bind = (Ipv4Addr::UNSPECIFIED, 2404).into();
     let ip_filter = match std::env::var("IEC_ALLOW") {
         Ok(raw) => {
-            let entries: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let entries: Vec<&str> = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
             let filter = IpFilter::from_strs(&entries)?;
             tracing::info!(?entries, "IP allow-list active");
             filter

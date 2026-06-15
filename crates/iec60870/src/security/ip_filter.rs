@@ -57,7 +57,9 @@ impl IpFilter {
     /// Reject every peer. Useful for putting a server into a hard-closed state
     /// at runtime without unbinding the listener.
     pub fn deny_all() -> Self {
-        Self { mode: Mode::DenyAll }
+        Self {
+            mode: Mode::DenyAll,
+        }
     }
 
     /// Build an allow-list from CIDRs and/or bare addresses.
@@ -167,7 +169,8 @@ mod tests {
 
     #[test]
     fn cidr_and_bare_addresses_mix() {
-        let f = IpFilter::from_strs(&["10.0.0.0/8", "192.168.1.5", "::1", "2001:db8::/32"]).unwrap();
+        let f =
+            IpFilter::from_strs(&["10.0.0.0/8", "192.168.1.5", "::1", "2001:db8::/32"]).unwrap();
         assert!(f.contains(sa("10.4.5.6:0")));
         assert!(f.contains(sa("192.168.1.5:0")));
         assert!(!f.contains(sa("192.168.1.6:0")));

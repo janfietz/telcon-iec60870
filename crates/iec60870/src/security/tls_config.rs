@@ -21,9 +21,7 @@ use std::sync::Arc;
 use tokio_rustls::rustls::crypto::{ring, CryptoProvider};
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::server::WebPkiClientVerifier;
-use tokio_rustls::rustls::{
-    RootCertStore, ServerConfig, SignatureScheme, SupportedCipherSuite,
-};
+use tokio_rustls::rustls::{RootCertStore, ServerConfig, SignatureScheme, SupportedCipherSuite};
 
 use crate::error::{Error, Result};
 
@@ -114,7 +112,10 @@ pub struct TlsSecurityConfig {
 impl std::fmt::Debug for TlsSecurityConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TlsSecurityConfig")
-            .field("server_chain", &format_args!("[{} cert(s)]", self.server_chain.len()))
+            .field(
+                "server_chain",
+                &format_args!("[{} cert(s)]", self.server_chain.len()),
+            )
             .field("client_roots", &self.client_roots)
             .field(
                 "cipher_suites",
@@ -131,11 +132,7 @@ impl TlsSecurityConfig {
     /// disk. Cipher/scheme allowlists default to `None`; client cert policy
     /// defaults to [`ClientCertPolicy::TrustChain`] (mTLS enforced against
     /// the loaded CAs, no extra pinning).
-    pub fn from_pem_paths(
-        cert: &Path,
-        key: &Path,
-        client_ca: &[&Path],
-    ) -> Result<Self> {
+    pub fn from_pem_paths(cert: &Path, key: &Path, client_ca: &[&Path]) -> Result<Self> {
         let server_chain = load_certs(cert)?;
         let server_key = load_private_key(key)?;
 
@@ -189,17 +186,12 @@ impl TlsSecurityConfig {
                 .with_single_cert(server_chain, server_key)
                 .map_err(|e| Error::Tls(format!("invalid server key/cert: {e}")))?,
             policy => {
-                let inner = WebPkiClientVerifier::builder_with_provider(
-                    Arc::new(client_roots),
-                    provider,
-                )
-                .build()
-                .map_err(|e| Error::Tls(format!("building client cert verifier: {e}")))?;
-                let policy_verifier = Arc::new(PolicyClientVerifier::new(
-                    inner,
-                    policy,
-                    signature_schemes,
-                ));
+                let inner =
+                    WebPkiClientVerifier::builder_with_provider(Arc::new(client_roots), provider)
+                        .build()
+                        .map_err(|e| Error::Tls(format!("building client cert verifier: {e}")))?;
+                let policy_verifier =
+                    Arc::new(PolicyClientVerifier::new(inner, policy, signature_schemes));
                 builder
                     .with_client_cert_verifier(policy_verifier)
                     .with_single_cert(server_chain, server_key)

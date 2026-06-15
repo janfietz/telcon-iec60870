@@ -32,13 +32,9 @@ async fn allow_all_accepts_loopback() {
         let _ = tokio::time::timeout(Duration::from_secs(2), conn.recv()).await;
     });
 
-    let client = Client104::connect_with(
-        Transport::tcp(addr),
-        Config::default(),
-        NoopHandler,
-    )
-    .await
-    .expect("client connects");
+    let client = Client104::connect_with(Transport::tcp(addr), Config::default(), NoopHandler)
+        .await
+        .expect("client connects");
     drop(client);
 
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
@@ -53,13 +49,9 @@ async fn cidr_allow_list_accepts_loopback() {
         let _ = tokio::time::timeout(Duration::from_secs(2), server.accept_with(NoopHandler)).await;
     });
 
-    let client = Client104::connect_with(
-        Transport::tcp(addr),
-        Config::default(),
-        NoopHandler,
-    )
-    .await
-    .expect("client connects when its address is allow-listed");
+    let client = Client104::connect_with(Transport::tcp(addr), Config::default(), NoopHandler)
+        .await
+        .expect("client connects when its address is allow-listed");
     drop(client);
 
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task).await;
@@ -75,8 +67,8 @@ async fn disjoint_allow_list_drops_loopback_peer() {
     // The server's accept_with future will loop forever (no allowed peer
     // ever connects). Park it on a background task so we can probe.
     let server_task = tokio::spawn(async move {
-        let _ = tokio::time::timeout(Duration::from_millis(700), server.accept_with(NoopHandler))
-            .await;
+        let _ =
+            tokio::time::timeout(Duration::from_millis(700), server.accept_with(NoopHandler)).await;
     });
 
     // The raw TCP connect will succeed (kernel SYN/ACK) but the server then
@@ -105,8 +97,8 @@ async fn deny_all_rejects_everything() {
     let addr = server.local_addr().expect("local_addr");
 
     let server_task = tokio::spawn(async move {
-        let _ = tokio::time::timeout(Duration::from_millis(500), server.accept_with(NoopHandler))
-            .await;
+        let _ =
+            tokio::time::timeout(Duration::from_millis(500), server.accept_with(NoopHandler)).await;
     });
 
     let mut stream = TcpStream::connect(addr).await.expect("tcp connect");

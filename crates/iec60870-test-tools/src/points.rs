@@ -11,9 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bytes::BytesMut;
 use iec60870::proto::asdu::cot::Cot;
 use iec60870::proto::asdu::header::{AsduAddressing, CommonAddress, Ioa, Vsq};
-use iec60870::proto::asdu::ie::{
-    Cp56Time2a, Diq, DoublePoint, Nva, Qds, Quality, R32, Siq, Sva,
-};
+use iec60870::proto::asdu::ie::{Cp56Time2a, Diq, DoublePoint, Nva, Qds, Quality, Siq, Sva, R32};
 use iec60870::proto::asdu::types::{
     M_DP_NA_1, M_DP_TB_1, M_ME_NA_1, M_ME_NB_1, M_ME_NC_1, M_ME_TD_1, M_ME_TE_1, M_ME_TF_1,
     M_SP_NA_1, M_SP_TB_1,
@@ -255,7 +253,13 @@ pub fn encode_point(ioa: u32, entry: &PointEntry, cot: Cot, ca: CommonAddress) -
         PointKind::SpNa => {
             let on = matches!(entry.value, PointValue::Single(true));
             let payload = M_SP_NA_1 {
-                objects: vec![(ioa_ie, Siq { on, quality: quality_from_wire(q) })],
+                objects: vec![(
+                    ioa_ie,
+                    Siq {
+                        on,
+                        quality: quality_from_wire(q),
+                    },
+                )],
             };
             Some(encode_asdu(&payload, cot, ca))
         }
@@ -265,7 +269,13 @@ pub fn encode_point(ioa: u32, entry: &PointEntry, cot: Cot, ca: CommonAddress) -
                 _ => DoublePoint::Off,
             };
             let payload = M_DP_NA_1 {
-                objects: vec![(ioa_ie, Diq { state, quality: quality_from_wire(q) })],
+                objects: vec![(
+                    ioa_ie,
+                    Diq {
+                        state,
+                        quality: quality_from_wire(q),
+                    },
+                )],
             };
             Some(encode_asdu(&payload, cot, ca))
         }
@@ -302,7 +312,16 @@ pub fn encode_point(ioa: u32, entry: &PointEntry, cot: Cot, ca: CommonAddress) -
         PointKind::SpTb => {
             let on = matches!(entry.value, PointValue::Single(true));
             let payload = M_SP_TB_1 {
-                objects: vec![(ioa_ie, (Siq { on, quality: quality_from_wire(q) }, ts))],
+                objects: vec![(
+                    ioa_ie,
+                    (
+                        Siq {
+                            on,
+                            quality: quality_from_wire(q),
+                        },
+                        ts,
+                    ),
+                )],
             };
             Some(encode_asdu(&payload, cot, ca))
         }
@@ -312,7 +331,16 @@ pub fn encode_point(ioa: u32, entry: &PointEntry, cot: Cot, ca: CommonAddress) -
                 _ => DoublePoint::Off,
             };
             let payload = M_DP_TB_1 {
-                objects: vec![(ioa_ie, (Diq { state, quality: quality_from_wire(q) }, ts))],
+                objects: vec![(
+                    ioa_ie,
+                    (
+                        Diq {
+                            state,
+                            quality: quality_from_wire(q),
+                        },
+                        ts,
+                    ),
+                )],
             };
             Some(encode_asdu(&payload, cot, ca))
         }
@@ -497,19 +525,27 @@ pub fn populate_default(image: &mut ProcessImage) {
 
 /// Convert this entry's value and quality into the kind-agnostic forms
 /// the core `iec60870::DeadbandTracker` consumes.
-pub fn entry_to_monitored(entry: &PointEntry) -> (iec60870::MonitoredValue, iec60870::proto::asdu::ie::Qds) {
+pub fn entry_to_monitored(
+    entry: &PointEntry,
+) -> (iec60870::MonitoredValue, iec60870::proto::asdu::ie::Qds) {
     use iec60870::MonitoredValue;
     let value = match (entry.kind, &entry.value) {
         (PointKind::SpNa | PointKind::SpTb, PointValue::Single(b)) => MonitoredValue::Single(*b),
         (PointKind::DpNa | PointKind::DpTb, PointValue::Double(dpw)) => {
             MonitoredValue::Double(match dpw {
-                DoublePointWire::Intermediate => iec60870::proto::asdu::ie::DoublePoint::Intermediate,
+                DoublePointWire::Intermediate => {
+                    iec60870::proto::asdu::ie::DoublePoint::Intermediate
+                }
                 DoublePointWire::Off => iec60870::proto::asdu::ie::DoublePoint::Off,
                 DoublePointWire::On => iec60870::proto::asdu::ie::DoublePoint::On,
-                DoublePointWire::Indeterminate => iec60870::proto::asdu::ie::DoublePoint::Indeterminate,
+                DoublePointWire::Indeterminate => {
+                    iec60870::proto::asdu::ie::DoublePoint::Indeterminate
+                }
             })
         }
-        (PointKind::MeNa | PointKind::MeTd, PointValue::Normalized(f)) => MonitoredValue::Normalized(*f),
+        (PointKind::MeNa | PointKind::MeTd, PointValue::Normalized(f)) => {
+            MonitoredValue::Normalized(*f)
+        }
         (PointKind::MeNb | PointKind::MeTe, PointValue::Scaled(s)) => MonitoredValue::Scaled(*s),
         (PointKind::MeNc | PointKind::MeTf, PointValue::Float(f)) => MonitoredValue::Float(*f),
         // Fallback for value/kind mismatch in the image — shouldn't happen.

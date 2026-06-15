@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use crate::asdu::header::Ioa;
 use crate::asdu::types::file::{
-    Afq, AfqAction, Checksum, F_AF_NA_1, F_FR_NA_1, F_LS_NA_1, F_SC_NA_1, F_SG_NA_1,
-    F_SR_NA_1, Frq, LengthOfFile, LengthOfSection, Lsq, NameOfFile, NameOfSection, Scq,
-    ScqAction, Srq, MAX_SEGMENT_BYTES,
+    Afq, AfqAction, Checksum, Frq, LengthOfFile, LengthOfSection, Lsq, NameOfFile, NameOfSection,
+    Scq, ScqAction, Srq, F_AF_NA_1, F_FR_NA_1, F_LS_NA_1, F_SC_NA_1, F_SG_NA_1, F_SR_NA_1,
+    MAX_SEGMENT_BYTES,
 };
 
 /// Default segment payload size in bytes. Conservative enough to fit inside
@@ -411,7 +411,9 @@ impl Session {
         }
         self.last_progress = Some(now);
         self.section_checksum.update_slice(&asdu.segment);
-        self.bytes_transferred = self.bytes_transferred.saturating_add(asdu.segment.len() as u32);
+        self.bytes_transferred = self
+            .bytes_transferred
+            .saturating_add(asdu.segment.len() as u32);
         self.emit(SessionAction::DeliverSegment(asdu.segment));
     }
 
@@ -452,10 +454,7 @@ impl Session {
         if self.awaiting_provider {
             return;
         }
-        let max = self
-            .config
-            .max_segment_bytes
-            .clamp(1, MAX_SEGMENT_BYTES);
+        let max = self.config.max_segment_bytes.clamp(1, MAX_SEGMENT_BYTES);
         self.awaiting_provider = true;
         self.emit(SessionAction::RequestNextSegment { max_bytes: max });
     }
@@ -636,7 +635,10 @@ mod tests {
         );
         // Expect SendSectionReady + RequestNextSegment.
         assert!(matches!(acts[0], SessionAction::SendSectionReady(_)));
-        assert!(matches!(acts[1], SessionAction::RequestNextSegment { max_bytes: 16 }));
+        assert!(matches!(
+            acts[1],
+            SessionAction::RequestNextSegment { max_bytes: 16 }
+        ));
         assert_eq!(s.state(), SessionState::TxSendingSegments);
 
         // Provider yields a 16-byte chunk.
@@ -792,10 +794,7 @@ mod tests {
             SessionAction::Failed(FailureReason::Aborted)
         ));
         // Subsequent inputs are ignored.
-        let acts = s.step(
-            SessionInput::FileReady(F_FR_NA_1::default()),
-            t0,
-        );
+        let acts = s.step(SessionInput::FileReady(F_FR_NA_1::default()), t0);
         assert!(acts.is_empty());
     }
 }

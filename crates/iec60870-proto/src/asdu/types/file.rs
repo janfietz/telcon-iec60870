@@ -131,9 +131,15 @@ pub struct Frq {
 impl Frq {
     pub const LEN: usize = 1;
     /// Standard "file ready, default acknowledgement" qualifier.
-    pub const READY: Self = Self { code: 0, negative: false };
+    pub const READY: Self = Self {
+        code: 0,
+        negative: false,
+    };
     /// Standard "file not ready" negative acknowledgement.
-    pub const NOT_READY: Self = Self { code: 0, negative: true };
+    pub const NOT_READY: Self = Self {
+        code: 0,
+        negative: true,
+    };
 
     pub fn encode<B: BufMut>(self, buf: &mut B) {
         let mut b = self.code & 0x7F;
@@ -162,8 +168,14 @@ pub struct Srq {
 
 impl Srq {
     pub const LEN: usize = 1;
-    pub const READY: Self = Self { code: 0, negative: false };
-    pub const NOT_READY: Self = Self { code: 0, negative: true };
+    pub const READY: Self = Self {
+        code: 0,
+        negative: false,
+    };
+    pub const NOT_READY: Self = Self {
+        code: 0,
+        negative: true,
+    };
 
     pub fn encode<B: BufMut>(self, buf: &mut B) {
         let mut b = self.code & 0x7F;
@@ -758,8 +770,7 @@ pub struct DirectoryEntry {
 }
 
 impl DirectoryEntry {
-    pub const LEN: usize =
-        NameOfFile::LEN + LengthOfFile::LEN + Sof::LEN + Cp56Time2a::LEN;
+    pub const LEN: usize = NameOfFile::LEN + LengthOfFile::LEN + Sof::LEN + Cp56Time2a::LEN;
 
     pub fn encode<B: BufMut>(self, buf: &mut B) {
         self.nof.encode(buf);
@@ -774,7 +785,12 @@ impl DirectoryEntry {
         let lof = LengthOfFile::decode(buf)?;
         let sof = Sof::decode(buf)?;
         let time = Cp56Time2a::decode(buf)?;
-        Ok(Self { nof, lof, sof, time })
+        Ok(Self {
+            nof,
+            lof,
+            sof,
+            time,
+        })
     }
 }
 
@@ -796,23 +812,18 @@ impl AsduPayload for F_DR_TA_1 {
         vsq: Vsq,
         addressing: AsduAddressing,
     ) {
-        crate::asdu::io_list::encode_io_list(
-            buf,
-            &self.entries,
-            vsq,
-            addressing,
-            |b, entry| entry.encode(b),
-        );
+        crate::asdu::io_list::encode_io_list(buf, &self.entries, vsq, addressing, |b, entry| {
+            entry.encode(b)
+        });
     }
     fn decode_information_objects<B: Buf>(
         buf: &mut B,
         vsq: Vsq,
         addressing: AsduAddressing,
     ) -> Result<Self> {
-        let entries =
-            crate::asdu::io_list::decode_io_list(buf, vsq, addressing, |b| {
-                DirectoryEntry::decode(b)
-            })?;
+        let entries = crate::asdu::io_list::decode_io_list(buf, vsq, addressing, |b| {
+            DirectoryEntry::decode(b)
+        })?;
         Ok(Self { entries })
     }
 }
@@ -907,7 +918,11 @@ mod tests {
     #[test]
     fn frq_bit7_is_negative_flag() {
         let mut buf = BytesMut::new();
-        Frq { code: 0x12, negative: true }.encode(&mut buf);
+        Frq {
+            code: 0x12,
+            negative: true,
+        }
+        .encode(&mut buf);
         assert_eq!(&buf[..], &[0x92]);
         let mut slice: &[u8] = &buf;
         let decoded = Frq::decode(&mut slice).unwrap();
@@ -968,7 +983,10 @@ mod tests {
                 ioa: Ioa(0),
                 nof: NameOfFile(0x1234),
                 lof: LengthOfFile(0x00_4242),
-                frq: Frq { code: 0, negative: false },
+                frq: Frq {
+                    code: 0,
+                    negative: false,
+                },
             },
             Vsq::single(1),
             Cause::FILE_TRANSFER,

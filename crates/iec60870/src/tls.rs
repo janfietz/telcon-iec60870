@@ -193,8 +193,15 @@ pub async fn tls_server_accept_with<H: EventHandler>(
     config: Config,
     handler: H,
 ) -> Result<ServerConnection> {
-    tls_server_accept_with_policy(stream, peer, acceptor, config, AsduPolicy::default(), handler)
-        .await
+    tls_server_accept_with_policy(
+        stream,
+        peer,
+        acceptor,
+        config,
+        AsduPolicy::default(),
+        handler,
+    )
+    .await
 }
 
 /// Accept one inbound TLS connection with a custom event handler and a

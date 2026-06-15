@@ -39,12 +39,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # iec60870-test-tools is a Unix-only e2e harness (its control plane uses
+        # Unix-domain sockets, driven by the bash specs). The library crates are
+        # cross-platform, so test the full workspace on Unix and exclude only
+        # that harness on Windows, where it does not compile.
+        include:
+          - os: ubuntu-latest
+            test_args: --workspace
+          - os: macos-latest
+            test_args: --workspace
+          - os: windows-latest
+            test_args: --workspace --exclude iec60870-test-tools
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features
+      - run: cargo test ${{ matrix.test_args }} --all-features
 
   msrv:
     name: msrv (1.83)

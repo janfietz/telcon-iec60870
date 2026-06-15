@@ -235,6 +235,16 @@ tests under `proptest` cover the codec layer for round-trip integrity across
 every input domain, and `cargo fuzz` targets live under [`fuzz/`](fuzz/) for
 the APDU, ASDU, and FT 1.2 frame decoders.
 
+### Git hooks
+
+A versioned pre-commit hook in [`.githooks/`](.githooks/) runs `rustfmt` on the
+Rust files you stage and re-stages them, so commits always satisfy the CI
+`cargo fmt --check` gate. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## License
 
 Dual-licensed under either of

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: auto-format staged Rust source with rustfmt before the
+# commit is recorded, so commits always match the CI `cargo fmt --check` gate.
+#
+# Enable it once per clone with:
+#     git config core.hooksPath .githooks
+#
+# It formats exactly the Rust files staged for this commit (respecting the
+# workspace rustfmt.toml) and re-stages them. Other files are left untouched.
+set -euo pipefail
+
+# Staged Rust files (Added / Copied / Modified — skip deletions/renames-away).
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+if [ ${#staged[@]} -eq 0 ]; then
+    exit 0
+fi
+
+if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "pre-commit: rustfmt not found; install it with 'rustup component add rustfmt'" >&2
+    echo "pre-commit: skipping auto-format (commit not blocked)" >&2
+    exit 0
+fi
+
+# Format in place (rustfmt discovers rustfmt.toml from each file's directory),
+# then re-stage so the formatted content is what gets committed.
+rustfmt "${staged[@]}"
+git add -- "${staged[@]}"
